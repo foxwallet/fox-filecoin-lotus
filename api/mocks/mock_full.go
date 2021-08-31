@@ -1382,6 +1382,21 @@ func (mr *MockFullNodeMockRecorder) MpoolSub(arg0 interface{}) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MpoolSub", reflect.TypeOf((*MockFullNode)(nil).MpoolSub), arg0)
 }
 
+// MpoolSubFox mocks base method.
+func (m *MockFullNode) MpoolSubFox(arg0 context.Context) (<-chan api.MpoolUpdateFox, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MpoolSubFox", arg0)
+	ret0, _ := ret[0].(<-chan api.MpoolUpdateFox)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MpoolSubFox indicates an expected call of MpoolSub.
+func (mr *MockFullNodeMockRecorder) MpoolSubFox(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MpoolSubFox", reflect.TypeOf((*MockFullNode)(nil).MpoolSubFox), arg0)
+}
+
 // MsigAddApprove mocks base method.
 func (m *MockFullNode) MsigAddApprove(arg0 context.Context, arg1, arg2 address.Address, arg3 uint64, arg4, arg5 address.Address, arg6 bool) (*api.MessagePrototype, error) {
 	m.ctrl.T.Helper()

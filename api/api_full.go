@@ -280,7 +280,7 @@ type FullNode interface {
 	// Note that this method may not be atomic. Use MpoolPushMessage instead.
 	MpoolGetNonce(context.Context, address.Address) (uint64, error) //perm:read
 	MpoolSub(context.Context) (<-chan MpoolUpdate, error)           //perm:read
-	MpoolSubFox(context.Context) (<-chan MpoolUpdateFox, error)
+	MpoolSubFox(context.Context) (<-chan MpoolUpdateFox, error)		//perm:read
 
 	// MpoolClear clears pending messages from the mpool
 	MpoolClear(context.Context, bool) error //perm:write

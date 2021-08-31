@@ -264,7 +264,7 @@ type FullNodeStruct struct {
 
 		MpoolSub func(p0 context.Context) (<-chan MpoolUpdate, error) `perm:"read"`
 
-		MpoolSubFox func(p0 context.Context) (<-chan MpoolUpdateFox, error) ``
+		MpoolSubFox func(p0 context.Context) (<-chan MpoolUpdateFox, error) `perm:"read"`
 
 		MsigAddApprove func(p0 context.Context, p1 address.Address, p2 address.Address, p3 uint64, p4 address.Address, p5 address.Address, p6 bool) (*MessagePrototype, error) `perm:"sign"`
 
