@@ -245,3 +245,7 @@ func (a *MpoolAPI) MpoolGetNonce(ctx context.Context, addr address.Address) (uin
 func (a *MpoolAPI) MpoolSub(ctx context.Context) (<-chan api.MpoolUpdate, error) {
 	return a.Mpool.Updates(ctx)
 }
+
+func (a *MpoolAPI) MpoolSubFox(ctx context.Context) (<-chan api.MpoolUpdateFox, error) {
+	return a.Mpool.UpdatesFox(ctx)
+}

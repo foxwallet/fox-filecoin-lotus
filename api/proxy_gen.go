@@ -264,6 +264,8 @@ type FullNodeStruct struct {
 
 		MpoolSub func(p0 context.Context) (<-chan MpoolUpdate, error) `perm:"read"`
 
+		MpoolSubFox func(p0 context.Context) (<-chan MpoolUpdateFox, error) ``
+
 		MsigAddApprove func(p0 context.Context, p1 address.Address, p2 address.Address, p3 uint64, p4 address.Address, p5 address.Address, p6 bool) (*MessagePrototype, error) `perm:"sign"`
 
 		MsigAddCancel func(p0 context.Context, p1 address.Address, p2 address.Address, p3 uint64, p4 address.Address, p5 bool) (*MessagePrototype, error) `perm:"sign"`
@@ -1903,6 +1905,17 @@ func (s *FullNodeStruct) MpoolSub(p0 context.Context) (<-chan MpoolUpdate, error
 }
 
 func (s *FullNodeStub) MpoolSub(p0 context.Context) (<-chan MpoolUpdate, error) {
+	return nil, ErrNotSupported
+}
+
+func (s *FullNodeStruct) MpoolSubFox(p0 context.Context) (<-chan MpoolUpdateFox, error) {
+	if s.Internal.MpoolSubFox == nil {
+		return nil, ErrNotSupported
+	}
+	return s.Internal.MpoolSubFox(p0)
+}
+
+func (s *FullNodeStub) MpoolSubFox(p0 context.Context) (<-chan MpoolUpdateFox, error) {
 	return nil, ErrNotSupported
 }
 

@@ -1471,6 +1471,40 @@ func (mp *MessagePool) Updates(ctx context.Context) (<-chan api.MpoolUpdate, err
 	return out, nil
 }
 
+func (mp *MessagePool) UpdatesFox(ctx context.Context) (<-chan api.MpoolUpdateFox, error) {
+	out := make(chan api.MpoolUpdateFox, 20)
+	sub := mp.changes.Sub(localUpdates)
+
+	go func() {
+		defer mp.changes.Unsub(sub, localUpdates)
+		defer close(out)
+
+		for {
+			select {
+			case u := <-sub:
+				update := u.(api.MpoolUpdateFox)
+				select {
+				case out <- api.MpoolUpdateFox{
+					Type:    update.Type,
+					Cid:     update.Message.Cid(),
+					Message: update.Message.VMMessage(),
+				}:
+				case <-ctx.Done():
+					return
+				case <-mp.closer:
+					return
+				}
+			case <-ctx.Done():
+				return
+			case <-mp.closer:
+				return
+			}
+		}
+	}()
+
+	return out, nil
+}
+
 func (mp *MessagePool) loadLocal(ctx context.Context) error {
 	res, err := mp.localMsgs.Query(query.Query{})
 	if err != nil {
