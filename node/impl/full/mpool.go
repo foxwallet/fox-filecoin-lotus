@@ -122,6 +122,22 @@ func (a *MpoolAPI) MpoolPending(ctx context.Context, tsk types.TipSetKey) ([]*ty
 	}
 }
 
+func (a *MpoolAPI) MpoolPendingFox(ctx context.Context, tsk types.TipSetKey) ([]*api.SignedMessageFox, error) {
+	msgs, err := a.MpoolPending(ctx, tsk)
+	if err != nil {
+		return nil, err
+	}
+	var pending []*api.SignedMessageFox
+	for _, msg := range msgs {
+		pending = append(pending, &api.SignedMessageFox{
+			Cid: msg.Cid(),
+			Message: msg.Message,
+			Signature: msg.Signature,
+		})
+	}
+	return pending, nil
+}
+
 func (a *MpoolAPI) MpoolClear(ctx context.Context, local bool) error {
 	a.Mpool.Clear(ctx, local)
 	return nil

@@ -218,6 +218,9 @@ type FullNode interface {
 	// MpoolPending returns pending mempool messages.
 	MpoolPending(context.Context, types.TipSetKey) ([]*types.SignedMessage, error) //perm:read
 
+	// MpoolPendingFox returns pending mempool messages.
+	MpoolPendingFox(context.Context, types.TipSetKey) ([]*api.SignedMessageFox, error) //perm:read
+
 	// MpoolSelect returns a list of pending messages for inclusion in the next block
 	MpoolSelect(context.Context, types.TipSetKey, float64) ([]*types.SignedMessage, error) //perm:read
 

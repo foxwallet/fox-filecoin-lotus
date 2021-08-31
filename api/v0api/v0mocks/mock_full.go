@@ -1203,6 +1203,21 @@ func (mr *MockFullNodeMockRecorder) MpoolPending(arg0, arg1 interface{}) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MpoolPending", reflect.TypeOf((*MockFullNode)(nil).MpoolPending), arg0, arg1)
 }
 
+// MpoolPendingFox mocks base method.
+func (m *MockFullNode) MpoolPendingFox(arg0 context.Context, arg1 types.TipSetKey) ([]*api.SignedMessageFox, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MpoolPendingFox", arg0, arg1)
+	ret0, _ := ret[0].([]*api.SignedMessageFox)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MpoolPendingFox indicates an expected call of MpoolPendingFox.
+func (mr *MockFullNodeMockRecorder) MpoolPendingFox(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MpoolPendingFox", reflect.TypeOf((*MockFullNode)(nil).MpoolPendingFox), arg0, arg1)
+}
+
 // MpoolPush mocks base method.
 func (m *MockFullNode) MpoolPush(arg0 context.Context, arg1 *types.SignedMessage) (cid.Cid, error) {
 	m.ctrl.T.Helper()

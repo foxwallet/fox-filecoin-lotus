@@ -173,6 +173,8 @@ type FullNodeStruct struct {
 
 		MpoolPending func(p0 context.Context, p1 types.TipSetKey) ([]*types.SignedMessage, error) `perm:"read"`
 
+		MpoolPendingFox func(p0 context.Context, p1 types.TipSetKey) ([]*api.SignedMessageFox, error) `perm:"read"`
+
 		MpoolPush func(p0 context.Context, p1 *types.SignedMessage) (cid.Cid, error) `perm:"write"`
 
 		MpoolPushMessage func(p0 context.Context, p1 *types.Message, p2 *api.MessageSendSpec) (*types.SignedMessage, error) `perm:"sign"`
@@ -1225,6 +1227,17 @@ func (s *FullNodeStruct) MpoolPending(p0 context.Context, p1 types.TipSetKey) ([
 
 func (s *FullNodeStub) MpoolPending(p0 context.Context, p1 types.TipSetKey) ([]*types.SignedMessage, error) {
 	return *new([]*types.SignedMessage), ErrNotSupported
+}
+
+func (s *FullNodeStruct) MpoolPendingFox(p0 context.Context, p1 types.TipSetKey) ([]*api.SignedMessageFox, error) {
+	if s.Internal.MpoolPendingFox == nil {
+		return *new([]*api.SignedMessageFox), ErrNotSupported
+	}
+	return s.Internal.MpoolPendingFox(p0, p1)
+}
+
+func (s *FullNodeStub) MpoolPendingFox(p0 context.Context, p1 types.TipSetKey) ([]*api.SignedMessageFox, error) {
+	return *new([]*api.SignedMessageFox), ErrNotSupported
 }
 
 func (s *FullNodeStruct) MpoolPush(p0 context.Context, p1 *types.SignedMessage) (cid.Cid, error) {
