@@ -1482,7 +1482,7 @@ func (mp *MessagePool) UpdatesFox(ctx context.Context) (<-chan api.MpoolUpdateFo
 		for {
 			select {
 			case u := <-sub:
-				update := u.(api.MpoolUpdateFox)
+				update := u.(api.MpoolUpdate)
 				select {
 				case out <- api.MpoolUpdateFox{
 					Type:    update.Type,
