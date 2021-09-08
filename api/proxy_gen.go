@@ -484,6 +484,8 @@ type GatewayStruct struct {
 
 		ChainGetMessage func(p0 context.Context, p1 cid.Cid) (*types.Message, error) ``
 
+		ChainGetPath func(p0 context.Context, p1 types.TipSetKey, p2 types.TipSetKey) ([]*HeadChange, error) ``
+
 		ChainGetTipSet func(p0 context.Context, p1 types.TipSetKey) (*types.TipSet, error) ``
 
 		ChainGetTipSetAfterHeight func(p0 context.Context, p1 abi.ChainEpoch, p2 types.TipSetKey) (*types.TipSet, error) ``
@@ -3063,6 +3065,17 @@ func (s *GatewayStruct) ChainGetMessage(p0 context.Context, p1 cid.Cid) (*types.
 
 func (s *GatewayStub) ChainGetMessage(p0 context.Context, p1 cid.Cid) (*types.Message, error) {
 	return nil, ErrNotSupported
+}
+
+func (s *GatewayStruct) ChainGetPath(p0 context.Context, p1 types.TipSetKey, p2 types.TipSetKey) ([]*HeadChange, error) {
+	if s.Internal.ChainGetPath == nil {
+		return *new([]*HeadChange), ErrNotSupported
+	}
+	return s.Internal.ChainGetPath(p0, p1, p2)
+}
+
+func (s *GatewayStub) ChainGetPath(p0 context.Context, p1 types.TipSetKey, p2 types.TipSetKey) ([]*HeadChange, error) {
+	return *new([]*HeadChange), ErrNotSupported
 }
 
 func (s *GatewayStruct) ChainGetTipSet(p0 context.Context, p1 types.TipSetKey) (*types.TipSet, error) {

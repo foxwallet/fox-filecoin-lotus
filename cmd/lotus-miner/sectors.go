@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -85,12 +86,23 @@ var sectorsStatusCmd = &cli.Command{
 	ArgsUsage: "<sectorNum>",
 	Flags: []cli.Flag{
 		&cli.BoolFlag{
-			Name:  "log",
-			Usage: "display event log",
+			Name:    "log",
+			Usage:   "display event log",
+			Aliases: []string{"l"},
 		},
 		&cli.BoolFlag{
-			Name:  "on-chain-info",
-			Usage: "show sector on chain info",
+			Name:    "on-chain-info",
+			Usage:   "show sector on chain info",
+			Aliases: []string{"c"},
+		},
+		&cli.BoolFlag{
+			Name:    "partition-info",
+			Usage:   "show partition related info",
+			Aliases: []string{"p"},
+		},
+		&cli.BoolFlag{
+			Name:  "proof",
+			Usage: "print snark proof bytes as hex",
 		},
 	},
 	Action: func(cctx *cli.Context) error {
@@ -126,7 +138,9 @@ var sectorsStatusCmd = &cli.Command{
 		fmt.Printf("SeedH:\t\t%d\n", status.Seed.Epoch)
 		fmt.Printf("Precommit:\t%s\n", status.PreCommitMsg)
 		fmt.Printf("Commit:\t\t%s\n", status.CommitMsg)
-		fmt.Printf("Proof:\t\t%x\n", status.Proof)
+		if cctx.Bool("proof") {
+			fmt.Printf("Proof:\t\t%x\n", status.Proof)
+		}
 		fmt.Printf("Deals:\t\t%v\n", status.Deals)
 		fmt.Printf("Retries:\t%d\n", status.Retries)
 		if status.LastErr != "" {
@@ -144,6 +158,93 @@ var sectorsStatusCmd = &cli.Command{
 			fmt.Printf("\nExpiration Info\n")
 			fmt.Printf("OnTime:\t\t%v\n", status.OnTime)
 			fmt.Printf("Early:\t\t%v\n", status.Early)
+		}
+
+		if cctx.Bool("partition-info") {
+			fullApi, nCloser, err := lcli.GetFullNodeAPI(cctx)
+			if err != nil {
+				return err
+			}
+			defer nCloser()
+
+			maddr, err := getActorAddress(ctx, cctx)
+			if err != nil {
+				return err
+			}
+
+			mact, err := fullApi.StateGetActor(ctx, maddr, types.EmptyTSK)
+			if err != nil {
+				return err
+			}
+
+			tbs := blockstore.NewTieredBstore(blockstore.NewAPIBlockstore(fullApi), blockstore.NewMemory())
+			mas, err := miner.Load(adt.WrapStore(ctx, cbor.NewCborStore(tbs)), mact)
+			if err != nil {
+				return err
+			}
+
+			errFound := errors.New("found")
+			if err := mas.ForEachDeadline(func(dlIdx uint64, dl miner.Deadline) error {
+				return dl.ForEachPartition(func(partIdx uint64, part miner.Partition) error {
+					pas, err := part.AllSectors()
+					if err != nil {
+						return err
+					}
+
+					set, err := pas.IsSet(id)
+					if err != nil {
+						return err
+					}
+					if set {
+						fmt.Printf("\nDeadline:\t%d\n", dlIdx)
+						fmt.Printf("Partition:\t%d\n", partIdx)
+
+						checkIn := func(name string, bg func() (bitfield.BitField, error)) error {
+							bf, err := bg()
+							if err != nil {
+								return err
+							}
+
+							set, err := bf.IsSet(id)
+							if err != nil {
+								return err
+							}
+							setstr := "no"
+							if set {
+								setstr = "yes"
+							}
+							fmt.Printf("%s:   \t%s\n", name, setstr)
+							return nil
+						}
+
+						if err := checkIn("Unproven", part.UnprovenSectors); err != nil {
+							return err
+						}
+						if err := checkIn("Live", part.LiveSectors); err != nil {
+							return err
+						}
+						if err := checkIn("Active", part.ActiveSectors); err != nil {
+							return err
+						}
+						if err := checkIn("Faulty", part.FaultySectors); err != nil {
+							return err
+						}
+						if err := checkIn("Recovering", part.RecoveringSectors); err != nil {
+							return err
+						}
+
+						return errFound
+					}
+
+					return nil
+				})
+			}); err != errFound {
+				if err != nil {
+					return err
+				}
+
+				fmt.Println("\nNot found in any partition")
+			}
 		}
 
 		if cctx.Bool("log") {
@@ -288,112 +389,132 @@ var sectorsListCmd = &cli.Command{
 				continue
 			}
 
-			if showRemoved || st.State != api.SectorState(sealing.Removed) {
-				_, inSSet := commitedIDs[s]
-				_, inASet := activeIDs[s]
-
-				dw, vp := .0, .0
-				if st.Expiration-st.Activation > 0 {
-					rdw := big.Add(st.DealWeight, st.VerifiedDealWeight)
-					dw = float64(big.Div(rdw, big.NewInt(int64(st.Expiration-st.Activation))).Uint64())
-					vp = float64(big.Div(big.Mul(st.VerifiedDealWeight, big.NewInt(9)), big.NewInt(int64(st.Expiration-st.Activation))).Uint64())
-				}
-
-				var deals int
-				for _, deal := range st.Deals {
-					if deal != 0 {
-						deals++
-					}
-				}
-
-				exp := st.Expiration
-				if st.OnTime > 0 && st.OnTime < exp {
-					exp = st.OnTime // Can be different when the sector was CC upgraded
-				}
-
-				m := map[string]interface{}{
-					"ID":      s,
-					"State":   color.New(stateOrder[sealing.SectorState(st.State)].col).Sprint(st.State),
-					"OnChain": yesno(inSSet),
-					"Active":  yesno(inASet),
-				}
-
-				if deals > 0 {
-					m["Deals"] = color.GreenString("%d", deals)
-				} else {
-					m["Deals"] = color.BlueString("CC")
-					if st.ToUpgrade {
-						m["Deals"] = color.CyanString("CC(upgrade)")
-					}
-				}
-
-				if !fast {
-					if !inSSet {
-						m["Expiration"] = "n/a"
-					} else {
-						m["Expiration"] = lcli.EpochTime(head.Height(), exp)
-
-						if !fast && deals > 0 {
-							m["DealWeight"] = units.BytesSize(dw)
-							if vp > 0 {
-								m["VerifiedPower"] = color.GreenString(units.BytesSize(vp))
-							}
-						}
-
-						if st.Early > 0 {
-							m["RecoveryTimeout"] = color.YellowString(lcli.EpochTime(head.Height(), st.Early))
-						}
-					}
-				}
-
-				if cctx.Bool("events") {
-					var events int
-					for _, sectorLog := range st.Log {
-						if !strings.HasPrefix(sectorLog.Kind, "event") {
-							continue
-						}
-						if sectorLog.Kind == "event;sealing.SectorRestart" {
-							continue
-						}
-						events++
-					}
-
-					pieces := len(st.Deals)
-
-					switch {
-					case events < 12+pieces:
-						m["Events"] = color.GreenString("%d", events)
-					case events < 20+pieces:
-						m["Events"] = color.YellowString("%d", events)
-					default:
-						m["Events"] = color.RedString("%d", events)
-					}
-				}
-
-				if cctx.Bool("seal-time") && len(st.Log) > 1 {
-					start := time.Unix(int64(st.Log[0].Timestamp), 0)
-
-					for _, sectorLog := range st.Log {
-						if sectorLog.Kind == "event;sealing.SectorProving" {
-							end := time.Unix(int64(sectorLog.Timestamp), 0)
-							dur := end.Sub(start)
-
-							switch {
-							case dur < 12*time.Hour:
-								m["SealTime"] = color.GreenString("%s", dur)
-							case dur < 24*time.Hour:
-								m["SealTime"] = color.YellowString("%s", dur)
-							default:
-								m["SealTime"] = color.RedString("%s", dur)
-							}
-
-							break
-						}
-					}
-				}
-
-				tw.Write(m)
+			if !showRemoved && st.State == api.SectorState(sealing.Removed) {
+				continue
 			}
+
+			_, inSSet := commitedIDs[s]
+			_, inASet := activeIDs[s]
+
+			const verifiedPowerGainMul = 9
+
+			dw, vp := .0, .0
+			estimate := st.Expiration-st.Activation <= 0
+			if !estimate {
+				rdw := big.Add(st.DealWeight, st.VerifiedDealWeight)
+				dw = float64(big.Div(rdw, big.NewInt(int64(st.Expiration-st.Activation))).Uint64())
+				vp = float64(big.Div(big.Mul(st.VerifiedDealWeight, big.NewInt(verifiedPowerGainMul)), big.NewInt(int64(st.Expiration-st.Activation))).Uint64())
+			} else {
+				for _, piece := range st.Pieces {
+					if piece.DealInfo != nil {
+						dw += float64(piece.Piece.Size)
+						if piece.DealInfo.DealProposal != nil && piece.DealInfo.DealProposal.VerifiedDeal {
+							vp += float64(piece.Piece.Size) * verifiedPowerGainMul
+						}
+					}
+				}
+			}
+
+			var deals int
+			for _, deal := range st.Deals {
+				if deal != 0 {
+					deals++
+				}
+			}
+
+			exp := st.Expiration
+			if st.OnTime > 0 && st.OnTime < exp {
+				exp = st.OnTime // Can be different when the sector was CC upgraded
+			}
+
+			m := map[string]interface{}{
+				"ID":      s,
+				"State":   color.New(stateOrder[sealing.SectorState(st.State)].col).Sprint(st.State),
+				"OnChain": yesno(inSSet),
+				"Active":  yesno(inASet),
+			}
+
+			if deals > 0 {
+				m["Deals"] = color.GreenString("%d", deals)
+			} else {
+				m["Deals"] = color.BlueString("CC")
+				if st.ToUpgrade {
+					m["Deals"] = color.CyanString("CC(upgrade)")
+				}
+			}
+
+			if !fast {
+				if !inSSet {
+					m["Expiration"] = "n/a"
+				} else {
+					m["Expiration"] = lcli.EpochTime(head.Height(), exp)
+					if st.Early > 0 {
+						m["RecoveryTimeout"] = color.YellowString(lcli.EpochTime(head.Height(), st.Early))
+					}
+				}
+			}
+
+			if !fast && deals > 0 {
+				estWrap := func(s string) string {
+					if !estimate {
+						return s
+					}
+					return fmt.Sprintf("[%s]", s)
+				}
+
+				m["DealWeight"] = estWrap(units.BytesSize(dw))
+				if vp > 0 {
+					m["VerifiedPower"] = estWrap(color.GreenString(units.BytesSize(vp)))
+				}
+			}
+
+			if cctx.Bool("events") {
+				var events int
+				for _, sectorLog := range st.Log {
+					if !strings.HasPrefix(sectorLog.Kind, "event") {
+						continue
+					}
+					if sectorLog.Kind == "event;sealing.SectorRestart" {
+						continue
+					}
+					events++
+				}
+
+				pieces := len(st.Deals)
+
+				switch {
+				case events < 12+pieces:
+					m["Events"] = color.GreenString("%d", events)
+				case events < 20+pieces:
+					m["Events"] = color.YellowString("%d", events)
+				default:
+					m["Events"] = color.RedString("%d", events)
+				}
+			}
+
+			if cctx.Bool("seal-time") && len(st.Log) > 1 {
+				start := time.Unix(int64(st.Log[0].Timestamp), 0)
+
+				for _, sectorLog := range st.Log {
+					if sectorLog.Kind == "event;sealing.SectorProving" { // todo: figure out a good way to not hardcode
+						end := time.Unix(int64(sectorLog.Timestamp), 0)
+						dur := end.Sub(start)
+
+						switch {
+						case dur < 12*time.Hour:
+							m["SealTime"] = color.GreenString("%s", dur)
+						case dur < 24*time.Hour:
+							m["SealTime"] = color.YellowString("%s", dur)
+						default:
+							m["SealTime"] = color.RedString("%s", dur)
+						}
+
+						break
+					}
+				}
+			}
+
+			tw.Write(m)
 		}
 
 		return tw.Flush(os.Stdout)
@@ -1628,9 +1749,28 @@ var sectorsExpiredCmd = &cli.Command{
 				}
 
 				toCheck, err = bitfield.SubtractBitField(toCheck, live)
+				if err != nil {
+					return err
+				}
+
+				unproven, err := part.UnprovenSectors()
+				if err != nil {
+					return err
+				}
+
+				toCheck, err = bitfield.SubtractBitField(toCheck, unproven)
+
 				return err
 			})
 		}); err != nil {
+			return err
+		}
+
+		err = mas.ForEachPrecommittedSector(func(pci miner.SectorPreCommitOnChainInfo) error {
+			toCheck.Unset(uint64(pci.Info.SectorNumber))
+			return nil
+		})
+		if err != nil {
 			return err
 		}
 

@@ -7,7 +7,7 @@ USAGE:
    lotus-miner [global options] command [command options] [arguments...]
 
 VERSION:
-   1.11.3-dev
+   1.11.4-dev
 
 COMMANDS:
    init     Initialize a lotus miner repo
@@ -1515,9 +1515,11 @@ USAGE:
    lotus-miner sectors status [command options] <sectorNum>
 
 OPTIONS:
-   --log            display event log (default: false)
-   --on-chain-info  show sector on chain info (default: false)
-   --help, -h       show help (default: false)
+   --log, -l             display event log (default: false)
+   --on-chain-info, -c   show sector on chain info (default: false)
+   --partition-info, -p  show partition related info (default: false)
+   --proof               print snark proof bytes as hex (default: false)
+   --help, -h            show help (default: false)
    
 ```
 
