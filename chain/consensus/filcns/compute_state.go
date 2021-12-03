@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/filecoin-project/lotus/chain/rand"
+
 	"github.com/ipfs/go-cid"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	"go.opencensus.io/stats"
@@ -14,11 +16,20 @@ import (
 	"github.com/filecoin-project/go-state-types/big"
 	blockadt "github.com/filecoin-project/specs-actors/actors/util/adt"
 
+	/* inline-gen template
+	   {{range .actorVersions}}
+	   	exported{{.}} "github.com/filecoin-project/specs-actors{{import .}}actors/builtin/exported"{{end}}
+
+	/* inline-gen start */
+
 	exported0 "github.com/filecoin-project/specs-actors/actors/builtin/exported"
 	exported2 "github.com/filecoin-project/specs-actors/v2/actors/builtin/exported"
 	exported3 "github.com/filecoin-project/specs-actors/v3/actors/builtin/exported"
 	exported4 "github.com/filecoin-project/specs-actors/v4/actors/builtin/exported"
 	exported5 "github.com/filecoin-project/specs-actors/v5/actors/builtin/exported"
+	exported6 "github.com/filecoin-project/specs-actors/v6/actors/builtin/exported"
+
+	/* inline-gen end */
 
 	"github.com/filecoin-project/lotus/build"
 	"github.com/filecoin-project/lotus/chain/actors"
@@ -36,12 +47,20 @@ func NewActorRegistry() *vm.ActorRegistry {
 	inv := vm.NewActorRegistry()
 
 	// TODO: define all these properties on the actors themselves, in specs-actors.
+	/* inline-gen template
+	{{range .actorVersions}}
+	inv.Register(vm.ActorsVersionPredicate(actors.Version{{.}}), exported{{.}}.BuiltinActors()...){{end}}
+
+	/* inline-gen start */
 
 	inv.Register(vm.ActorsVersionPredicate(actors.Version0), exported0.BuiltinActors()...)
 	inv.Register(vm.ActorsVersionPredicate(actors.Version2), exported2.BuiltinActors()...)
 	inv.Register(vm.ActorsVersionPredicate(actors.Version3), exported3.BuiltinActors()...)
 	inv.Register(vm.ActorsVersionPredicate(actors.Version4), exported4.BuiltinActors()...)
 	inv.Register(vm.ActorsVersionPredicate(actors.Version5), exported5.BuiltinActors()...)
+	inv.Register(vm.ActorsVersionPredicate(actors.Version6), exported6.BuiltinActors()...)
+
+	/* inline-gen end */
 
 	return inv
 }
@@ -278,7 +297,7 @@ func (t *TipSetExecutor) ExecuteTipSet(ctx context.Context, sm *stmgr.StateManag
 		parentEpoch = parent.Height
 	}
 
-	r := store.NewChainRand(sm.ChainStore(), ts.Cids())
+	r := rand.NewStateRand(sm.ChainStore(), ts.Cids(), sm.Beacon())
 
 	blkmsgs, err := sm.ChainStore().BlockMsgsForTipset(ts)
 	if err != nil {

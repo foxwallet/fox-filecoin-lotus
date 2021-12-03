@@ -177,7 +177,7 @@ var LibP2P = Options(
 	// Host settings
 	Override(DefaultTransportsKey, lp2p.DefaultTransports),
 	Override(AddrsFactoryKey, lp2p.AddrsFactory(nil, nil)),
-	Override(SmuxTransportKey, lp2p.SmuxTransport(true)),
+	Override(SmuxTransportKey, lp2p.SmuxTransport()),
 	Override(RelayKey, lp2p.NoRelay()),
 	Override(SecurityKey, lp2p.Security(true, false)),
 
@@ -370,6 +370,13 @@ func Test() Option {
 func WithRepoType(repoType repo.RepoType) func(s *Settings) error {
 	return func(s *Settings) error {
 		s.nodeType = repoType
+		return nil
+	}
+}
+
+func WithEnableLibp2pNode(enable bool) func(s *Settings) error {
+	return func(s *Settings) error {
+		s.enableLibp2pNode = enable
 		return nil
 	}
 }

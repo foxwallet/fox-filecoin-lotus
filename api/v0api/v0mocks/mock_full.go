@@ -21,6 +21,7 @@ import (
 	network "github.com/filecoin-project/go-state-types/network"
 	api "github.com/filecoin-project/lotus/api"
 	apitypes "github.com/filecoin-project/lotus/api/types"
+	v0api "github.com/filecoin-project/lotus/api/v0api"
 	miner "github.com/filecoin-project/lotus/chain/actors/builtin/miner"
 	types "github.com/filecoin-project/lotus/chain/types"
 	alerting "github.com/filecoin-project/lotus/journal/alerting"
@@ -760,7 +761,7 @@ func (mr *MockFullNodeMockRecorder) ClientRestartDataTransfer(arg0, arg1, arg2, 
 }
 
 // ClientRetrieve mocks base method.
-func (m *MockFullNode) ClientRetrieve(arg0 context.Context, arg1 api.RetrievalOrder, arg2 *api.FileRef) error {
+func (m *MockFullNode) ClientRetrieve(arg0 context.Context, arg1 v0api.RetrievalOrder, arg2 *api.FileRef) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ClientRetrieve", arg0, arg1, arg2)
 	ret0, _ := ret[0].(error)
@@ -788,7 +789,7 @@ func (mr *MockFullNodeMockRecorder) ClientRetrieveTryRestartInsufficientFunds(ar
 }
 
 // ClientRetrieveWithEvents mocks base method.
-func (m *MockFullNode) ClientRetrieveWithEvents(arg0 context.Context, arg1 api.RetrievalOrder, arg2 *api.FileRef) (<-chan marketevents.RetrievalEvent, error) {
+func (m *MockFullNode) ClientRetrieveWithEvents(arg0 context.Context, arg1 v0api.RetrievalOrder, arg2 *api.FileRef) (<-chan marketevents.RetrievalEvent, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ClientRetrieveWithEvents", arg0, arg1, arg2)
 	ret0, _ := ret[0].(<-chan marketevents.RetrievalEvent)
@@ -2199,6 +2200,36 @@ func (m *MockFullNode) StateGetActor(arg0 context.Context, arg1 address.Address,
 func (mr *MockFullNodeMockRecorder) StateGetActor(arg0, arg1, arg2 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateGetActor", reflect.TypeOf((*MockFullNode)(nil).StateGetActor), arg0, arg1, arg2)
+}
+
+// StateGetRandomnessFromBeacon mocks base method.
+func (m *MockFullNode) StateGetRandomnessFromBeacon(arg0 context.Context, arg1 crypto.DomainSeparationTag, arg2 abi.ChainEpoch, arg3 []byte, arg4 types.TipSetKey) (abi.Randomness, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StateGetRandomnessFromBeacon", arg0, arg1, arg2, arg3, arg4)
+	ret0, _ := ret[0].(abi.Randomness)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// StateGetRandomnessFromBeacon indicates an expected call of StateGetRandomnessFromBeacon.
+func (mr *MockFullNodeMockRecorder) StateGetRandomnessFromBeacon(arg0, arg1, arg2, arg3, arg4 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateGetRandomnessFromBeacon", reflect.TypeOf((*MockFullNode)(nil).StateGetRandomnessFromBeacon), arg0, arg1, arg2, arg3, arg4)
+}
+
+// StateGetRandomnessFromTickets mocks base method.
+func (m *MockFullNode) StateGetRandomnessFromTickets(arg0 context.Context, arg1 crypto.DomainSeparationTag, arg2 abi.ChainEpoch, arg3 []byte, arg4 types.TipSetKey) (abi.Randomness, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StateGetRandomnessFromTickets", arg0, arg1, arg2, arg3, arg4)
+	ret0, _ := ret[0].(abi.Randomness)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// StateGetRandomnessFromTickets indicates an expected call of StateGetRandomnessFromTickets.
+func (mr *MockFullNodeMockRecorder) StateGetRandomnessFromTickets(arg0, arg1, arg2, arg3, arg4 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateGetRandomnessFromTickets", reflect.TypeOf((*MockFullNode)(nil).StateGetRandomnessFromTickets), arg0, arg1, arg2, arg3, arg4)
 }
 
 // StateGetReceipt mocks base method.

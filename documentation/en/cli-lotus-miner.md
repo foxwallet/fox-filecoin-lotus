@@ -7,7 +7,7 @@ USAGE:
    lotus-miner [global options] command [command options] [arguments...]
 
 VERSION:
-   1.11.4-dev
+   1.13.3-dev
 
 COMMANDS:
    init     Initialize a lotus miner repo
@@ -41,7 +41,7 @@ COMMANDS:
      sealing  interact with sealing pipeline
 
 GLOBAL OPTIONS:
-   --actor value, -a value                  specify other actor to check state for (read only)
+   --actor value, -a value                  specify other actor to query / manipulate
    --color                                  use color in display output (default: depends on output being a TTY)
    --miner-repo value, --storagerepo value  Specify miner repo path. flag(storagerepo) and env(LOTUS_STORAGE_PATH) are DEPRECATION, will REMOVE SOON (default: "~/.lotusminer") [$LOTUS_MINER_PATH, $LOTUS_STORAGE_PATH]
    --markets-repo value                     Markets repo path [$LOTUS_MARKETS_PATH]
@@ -278,7 +278,8 @@ USAGE:
    lotus-miner actor withdraw [command options] [amount (FIL)]
 
 OPTIONS:
-   --help, -h  show help (default: false)
+   --confidence value  number of block confirmations to wait for (default: 5)
+   --help, -h          show help (default: false)
    
 ```
 
@@ -589,7 +590,8 @@ CATEGORY:
    DEVELOPER
 
 OPTIONS:
-   --help, -h  show help (default: false)
+   --timeout value  duration to wait till fail (default: 30s)
+   --help, -h       show help (default: false)
    
 ```
 
@@ -628,6 +630,7 @@ COMMANDS:
    reset-blocklist    Remove all entries from the miner's piece CID blocklist
    set-seal-duration  Set the expected time, in minutes, that you expect sealing sectors to take. Deals that start before this duration will be rejected.
    pending-publish    list deals waiting in publish queue
+   retry-publish      retry publishing a deal
    help, h            Shows a list of commands or help for one command
 
 OPTIONS:
@@ -658,9 +661,10 @@ USAGE:
    lotus-miner storage-deals list [command options] [arguments...]
 
 OPTIONS:
-   --verbose, -v  (default: false)
-   --watch        watch deal updates in real-time, rather than a one time list (default: false)
-   --help, -h     show help (default: false)
+   --format value  output format of data, supported: table, json (default: "table")
+   --verbose, -v   (default: false)
+   --watch         watch deal updates in real-time, rather than a one time list (default: false)
+   --help, -h      show help (default: false)
    
 ```
 
@@ -820,6 +824,19 @@ USAGE:
 OPTIONS:
    --publish-now  send a publish message now (default: false)
    --help, -h     show help (default: false)
+   
+```
+
+### lotus-miner storage-deals retry-publish
+```
+NAME:
+   lotus-miner storage-deals retry-publish - retry publishing a deal
+
+USAGE:
+   lotus-miner storage-deals retry-publish [command options] <proposal CID>
+
+OPTIONS:
+   --help, -h  show help (default: false)
    
 ```
 
@@ -1443,7 +1460,8 @@ USAGE:
    lotus-miner pieces list-cids [command options] [arguments...]
 
 OPTIONS:
-   --help, -h  show help (default: false)
+   --verbose, -v  (default: false)
+   --help, -h     show help (default: false)
    
 ```
 
@@ -1532,13 +1550,14 @@ USAGE:
    lotus-miner sectors list [command options] [arguments...]
 
 OPTIONS:
-   --show-removed  show removed sectors (default: false)
-   --color, -c     use color in display output (default: depends on output being a TTY)
-   --fast          don't show on-chain info for better performance (default: false)
-   --events        display number of events the sector has received (default: false)
-   --seal-time     display how long it took for the sector to be sealed (default: false)
-   --states value  filter sectors by a comma-separated list of states
-   --help, -h      show help (default: false)
+   --show-removed, -r  show removed sectors (default: false)
+   --color, -c         use color in display output (default: depends on output being a TTY)
+   --fast, -f          don't show on-chain info for better performance (default: false)
+   --events, -e        display number of events the sector has received (default: false)
+   --seal-time         display how long it took for the sector to be sealed (default: false)
+   --states value      filter sectors by a comma-separated list of states
+   --unproven, -u      only show sectors which aren't in the 'Proving' state (default: false)
+   --help, -h          show help (default: false)
    
 ```
 
@@ -1896,9 +1915,10 @@ USAGE:
    lotus-miner proving check [command options] <deadlineIdx>
 
 OPTIONS:
-   --only-bad  print only bad sectors (default: false)
-   --slow      run slower checks (default: false)
-   --help, -h  show help (default: false)
+   --only-bad          print only bad sectors (default: false)
+   --slow              run slower checks (default: false)
+   --storage-id value  filter sectors by storage path (path id)
+   --help, -h          show help (default: false)
    
 ```
 
@@ -1964,6 +1984,8 @@ OPTIONS:
    --seal               (for init) use path for sealing (default: false)
    --store              (for init) use path for long-term storage (default: false)
    --max-storage value  (for init) limit storage space for sectors (expensive for very large paths!)
+   --groups value       path group names
+   --allow-to value     path groups allowed to pull data from this path (allow all if not specified)
    --help, -h           show help (default: false)
    
 ```

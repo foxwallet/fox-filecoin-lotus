@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"os"
 	"testing"
 
 	"github.com/filecoin-project/go-state-types/abi"
@@ -286,7 +287,7 @@ func (p *pieceProviderTestHarness) addRemoteWorker(t *testing.T, tasks []sealtas
 
 	worker := newLocalWorker(nil, WorkerConfig{
 		TaskTypes: tasks,
-	}, remote, localStore, p.index, p.mgr, csts)
+	}, os.LookupEnv, remote, localStore, p.index, p.mgr, csts)
 
 	p.servers = append(p.servers, svc)
 	p.localStores = append(p.localStores, localStore)
@@ -298,7 +299,7 @@ func (p *pieceProviderTestHarness) addRemoteWorker(t *testing.T, tasks []sealtas
 func (p *pieceProviderTestHarness) removeAllUnsealedSectorFiles(t *testing.T) {
 	for i := range p.localStores {
 		ls := p.localStores[i]
-		require.NoError(t, ls.Remove(p.ctx, p.sector.ID, storiface.FTUnsealed, false))
+		require.NoError(t, ls.Remove(p.ctx, p.sector.ID, storiface.FTUnsealed, false, nil))
 	}
 }
 
@@ -337,7 +338,7 @@ func (p *pieceProviderTestHarness) isUnsealed(t *testing.T, offset storiface.Unp
 
 func (p *pieceProviderTestHarness) readPiece(t *testing.T, offset storiface.UnpaddedByteIndex, size abi.UnpaddedPieceSize,
 	expectedHadToUnseal bool, expectedBytes []byte) {
-	rd, isUnsealed, err := p.pp.ReadPiece(p.ctx, p.sector, offset, size, p.ticket, p.commD)
+	rd, isUnsealed, err := p.pp.ReadPiece(p.ctx, p.sector, offset, 0, size, p.ticket, p.commD)
 	require.NoError(t, err)
 	require.NotNil(t, rd)
 	require.Equal(t, expectedHadToUnseal, isUnsealed)

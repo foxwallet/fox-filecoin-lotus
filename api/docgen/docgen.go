@@ -15,7 +15,6 @@ import (
 	"github.com/filecoin-project/go-bitfield"
 	"github.com/google/uuid"
 	"github.com/ipfs/go-cid"
-	"github.com/ipfs/go-filestore"
 	"github.com/libp2p/go-libp2p-core/metrics"
 	"github.com/libp2p/go-libp2p-core/network"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -24,9 +23,10 @@ import (
 	"github.com/multiformats/go-multiaddr"
 
 	datatransfer "github.com/filecoin-project/go-data-transfer"
-	filestore2 "github.com/filecoin-project/go-fil-markets/filestore"
+	filestore "github.com/filecoin-project/go-fil-markets/filestore"
 	"github.com/filecoin-project/go-fil-markets/retrievalmarket"
 	"github.com/filecoin-project/go-jsonrpc/auth"
+	textselector "github.com/ipld/go-ipld-selector-text-lite"
 
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/crypto"
@@ -90,6 +90,9 @@ func init() {
 	addExample(&pid)
 
 	storeIDExample := imports.ID(50)
+	textSelExample := textselector.Expression("Links/21/Hash/Links/42/Hash")
+	apiSelExample := api.Selector("Links/21/Hash/Links/42/Hash")
+	clientEvent := retrievalmarket.ClientEventDealAccepted
 
 	addExample(bitfield.NewFromSet([]uint64{5}))
 	addExample(abi.RegisteredSealProof_StackedDrg32GiBV1_1)
@@ -108,7 +111,6 @@ func init() {
 	addExample(abi.UnpaddedPieceSize(1024))
 	addExample(abi.UnpaddedPieceSize(1024).Padded())
 	addExample(abi.DealID(5432))
-	addExample(filestore.StatusFileChanged)
 	addExample(abi.SectorNumber(9))
 	addExample(abi.SectorSize(32 * 1024 * 1024 * 1024))
 	addExample(api.MpoolChange(0))
@@ -122,8 +124,12 @@ func init() {
 	addExample(datatransfer.Ongoing)
 	addExample(storeIDExample)
 	addExample(&storeIDExample)
+	addExample(clientEvent)
+	addExample(&clientEvent)
 	addExample(retrievalmarket.ClientEventDealAccepted)
 	addExample(retrievalmarket.DealStatusNew)
+	addExample(&textSelExample)
+	addExample(&apiSelExample)
 	addExample(network.ReachabilityPublic)
 	addExample(build.NewestNetworkVersion)
 	addExample(map[string]int{"name": 42})
@@ -175,7 +181,7 @@ func init() {
 	ExampleValues[reflect.TypeOf(struct{ A multiaddr.Multiaddr }{}).Field(0).Type] = maddr
 
 	// miner specific
-	addExample(filestore2.Path(".lotusminer/fstmp123"))
+	addExample(filestore.Path(".lotusminer/fstmp123"))
 	si := uint64(12)
 	addExample(&si)
 	addExample(retrievalmarket.DealID(5))
@@ -225,16 +231,18 @@ func init() {
 				Hostname: "host",
 				Resources: storiface.WorkerResources{
 					MemPhysical: 256 << 30,
+					MemUsed:     2 << 30,
 					MemSwap:     120 << 30,
-					MemReserved: 2 << 30,
+					MemSwapUsed: 2 << 30,
 					CPUs:        64,
 					GPUs:        []string{"aGPU 1337"},
+					Resources:   storiface.ResourceTable,
 				},
 			},
 			Enabled:    true,
 			MemUsedMin: 0,
 			MemUsedMax: 0,
-			GpuUsed:    false,
+			GpuUsed:    0,
 			CpuUse:     0,
 		},
 	})
@@ -280,6 +288,7 @@ func init() {
 		State: "ShardStateAvailable",
 		Error: "<error>",
 	})
+	addExample(storiface.ResourceTable)
 }
 
 func GetAPIType(name, pkg string) (i interface{}, t reflect.Type, permStruct []reflect.Type) {

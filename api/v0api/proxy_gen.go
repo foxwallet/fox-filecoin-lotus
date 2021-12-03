@@ -125,11 +125,11 @@ type FullNodeStruct struct {
 
 		ClientRestartDataTransfer func(p0 context.Context, p1 datatransfer.TransferID, p2 peer.ID, p3 bool) error `perm:"write"`
 
-		ClientRetrieve func(p0 context.Context, p1 api.RetrievalOrder, p2 *api.FileRef) error `perm:"admin"`
+		ClientRetrieve func(p0 context.Context, p1 RetrievalOrder, p2 *api.FileRef) error `perm:"admin"`
 
 		ClientRetrieveTryRestartInsufficientFunds func(p0 context.Context, p1 address.Address) error `perm:"write"`
 
-		ClientRetrieveWithEvents func(p0 context.Context, p1 api.RetrievalOrder, p2 *api.FileRef) (<-chan marketevents.RetrievalEvent, error) `perm:"admin"`
+		ClientRetrieveWithEvents func(p0 context.Context, p1 RetrievalOrder, p2 *api.FileRef) (<-chan marketevents.RetrievalEvent, error) `perm:"admin"`
 
 		ClientStartDeal func(p0 context.Context, p1 *api.StartDealParams) (*cid.Cid, error) `perm:"admin"`
 
@@ -270,6 +270,10 @@ type FullNodeStruct struct {
 		StateDecodeParams func(p0 context.Context, p1 address.Address, p2 abi.MethodNum, p3 []byte, p4 types.TipSetKey) (interface{}, error) `perm:"read"`
 
 		StateGetActor func(p0 context.Context, p1 address.Address, p2 types.TipSetKey) (*types.Actor, error) `perm:"read"`
+
+		StateGetRandomnessFromBeacon func(p0 context.Context, p1 crypto.DomainSeparationTag, p2 abi.ChainEpoch, p3 []byte, p4 types.TipSetKey) (abi.Randomness, error) `perm:"read"`
+
+		StateGetRandomnessFromTickets func(p0 context.Context, p1 crypto.DomainSeparationTag, p2 abi.ChainEpoch, p3 []byte, p4 types.TipSetKey) (abi.Randomness, error) `perm:"read"`
 
 		StateGetReceipt func(p0 context.Context, p1 cid.Cid, p2 types.TipSetKey) (*types.MessageReceipt, error) `perm:"read"`
 
@@ -965,14 +969,14 @@ func (s *FullNodeStub) ClientRestartDataTransfer(p0 context.Context, p1 datatran
 	return ErrNotSupported
 }
 
-func (s *FullNodeStruct) ClientRetrieve(p0 context.Context, p1 api.RetrievalOrder, p2 *api.FileRef) error {
+func (s *FullNodeStruct) ClientRetrieve(p0 context.Context, p1 RetrievalOrder, p2 *api.FileRef) error {
 	if s.Internal.ClientRetrieve == nil {
 		return ErrNotSupported
 	}
 	return s.Internal.ClientRetrieve(p0, p1, p2)
 }
 
-func (s *FullNodeStub) ClientRetrieve(p0 context.Context, p1 api.RetrievalOrder, p2 *api.FileRef) error {
+func (s *FullNodeStub) ClientRetrieve(p0 context.Context, p1 RetrievalOrder, p2 *api.FileRef) error {
 	return ErrNotSupported
 }
 
@@ -987,14 +991,14 @@ func (s *FullNodeStub) ClientRetrieveTryRestartInsufficientFunds(p0 context.Cont
 	return ErrNotSupported
 }
 
-func (s *FullNodeStruct) ClientRetrieveWithEvents(p0 context.Context, p1 api.RetrievalOrder, p2 *api.FileRef) (<-chan marketevents.RetrievalEvent, error) {
+func (s *FullNodeStruct) ClientRetrieveWithEvents(p0 context.Context, p1 RetrievalOrder, p2 *api.FileRef) (<-chan marketevents.RetrievalEvent, error) {
 	if s.Internal.ClientRetrieveWithEvents == nil {
 		return nil, ErrNotSupported
 	}
 	return s.Internal.ClientRetrieveWithEvents(p0, p1, p2)
 }
 
-func (s *FullNodeStub) ClientRetrieveWithEvents(p0 context.Context, p1 api.RetrievalOrder, p2 *api.FileRef) (<-chan marketevents.RetrievalEvent, error) {
+func (s *FullNodeStub) ClientRetrieveWithEvents(p0 context.Context, p1 RetrievalOrder, p2 *api.FileRef) (<-chan marketevents.RetrievalEvent, error) {
 	return nil, ErrNotSupported
 }
 
@@ -1766,6 +1770,28 @@ func (s *FullNodeStruct) StateGetActor(p0 context.Context, p1 address.Address, p
 
 func (s *FullNodeStub) StateGetActor(p0 context.Context, p1 address.Address, p2 types.TipSetKey) (*types.Actor, error) {
 	return nil, ErrNotSupported
+}
+
+func (s *FullNodeStruct) StateGetRandomnessFromBeacon(p0 context.Context, p1 crypto.DomainSeparationTag, p2 abi.ChainEpoch, p3 []byte, p4 types.TipSetKey) (abi.Randomness, error) {
+	if s.Internal.StateGetRandomnessFromBeacon == nil {
+		return *new(abi.Randomness), ErrNotSupported
+	}
+	return s.Internal.StateGetRandomnessFromBeacon(p0, p1, p2, p3, p4)
+}
+
+func (s *FullNodeStub) StateGetRandomnessFromBeacon(p0 context.Context, p1 crypto.DomainSeparationTag, p2 abi.ChainEpoch, p3 []byte, p4 types.TipSetKey) (abi.Randomness, error) {
+	return *new(abi.Randomness), ErrNotSupported
+}
+
+func (s *FullNodeStruct) StateGetRandomnessFromTickets(p0 context.Context, p1 crypto.DomainSeparationTag, p2 abi.ChainEpoch, p3 []byte, p4 types.TipSetKey) (abi.Randomness, error) {
+	if s.Internal.StateGetRandomnessFromTickets == nil {
+		return *new(abi.Randomness), ErrNotSupported
+	}
+	return s.Internal.StateGetRandomnessFromTickets(p0, p1, p2, p3, p4)
+}
+
+func (s *FullNodeStub) StateGetRandomnessFromTickets(p0 context.Context, p1 crypto.DomainSeparationTag, p2 abi.ChainEpoch, p3 []byte, p4 types.TipSetKey) (abi.Randomness, error) {
+	return *new(abi.Randomness), ErrNotSupported
 }
 
 func (s *FullNodeStruct) StateGetReceipt(p0 context.Context, p1 cid.Cid, p2 types.TipSetKey) (*types.MessageReceipt, error) {
