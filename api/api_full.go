@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/filecoin-project/go-address"
 	"time"
 
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p-core/peer"
 
-	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-bitfield"
 	datatransfer "github.com/filecoin-project/go-data-transfer"
 	"github.com/filecoin-project/go-state-types/abi"
@@ -241,7 +241,7 @@ type FullNode interface {
 	MpoolSelect(context.Context, types.TipSetKey, float64) ([]*types.SignedMessage, error) //perm:read
 
 	// MpoolPush pushes a signed message to mempool.
-	MpoolPush(context.Context, *types.SignedMessage) (cid.Cid, error) //perm:write
+	MpoolPush(context.Context, *types.SignedMessage) (cid.Cid, error) //perm:read
 
 	// MpoolPushUntrusted pushes a signed message to mempool from untrusted sources.
 	MpoolPushUntrusted(context.Context, *types.SignedMessage) (cid.Cid, error) //perm:write

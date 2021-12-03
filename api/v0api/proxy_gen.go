@@ -175,7 +175,7 @@ type FullNodeStruct struct {
 
 		MpoolPendingFox func(p0 context.Context, p1 types.TipSetKey) ([]*api.SignedMessageFox, error) `perm:"read"`
 
-		MpoolPush func(p0 context.Context, p1 *types.SignedMessage) (cid.Cid, error) `perm:"write"`
+		MpoolPush func(p0 context.Context, p1 *types.SignedMessage) (cid.Cid, error) `perm:"read"`
 
 		MpoolPushMessage func(p0 context.Context, p1 *types.Message, p2 *api.MessageSendSpec) (*types.SignedMessage, error) `perm:"sign"`
 
