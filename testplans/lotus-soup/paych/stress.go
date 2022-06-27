@@ -6,11 +6,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/filecoin-project/go-state-types/builtin/v8/paych"
+
 	"github.com/ipfs/go-cid"
 
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/build"
-	"github.com/filecoin-project/specs-actors/actors/builtin/paych"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/big"
@@ -124,7 +125,9 @@ func runSender(ctx context.Context, t *testkit.TestEnvironment, clients []*testk
 
 	time.Sleep(20 * time.Second)
 
-	channel, err := cl.FullApi.PaychGet(ctx, cl.Wallet.Address, recv.WalletAddr, channelAmt)
+	channel, err := cl.FullApi.PaychGet(ctx, cl.Wallet.Address, recv.WalletAddr, channelAmt, api.PaychGetOpts{
+		OffChain: false,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create payment channel: %w", err)
 	}

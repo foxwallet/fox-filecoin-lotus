@@ -5,6 +5,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/filecoin-project/go-state-types/network"
+
 	dchain "github.com/drand/drand/chain"
 	dclient "github.com/drand/drand/client"
 	hclient "github.com/drand/drand/client/http"
@@ -142,7 +144,7 @@ func (db *DrandBeacon) Entry(ctx context.Context, round uint64) <-chan beacon.Re
 
 	go func() {
 		start := build.Clock.Now()
-		log.Infow("start fetching randomness", "round", round)
+		log.Debugw("start fetching randomness", "round", round)
 		resp, err := db.client.Get(ctx, round)
 
 		var br beacon.Response
@@ -152,7 +154,7 @@ func (db *DrandBeacon) Entry(ctx context.Context, round uint64) <-chan beacon.Re
 			br.Entry.Round = resp.Round()
 			br.Entry.Data = resp.Signature()
 		}
-		log.Infow("done fetching randomness", "round", round, "took", build.Clock.Since(start))
+		log.Debugw("done fetching randomness", "round", round, "took", build.Clock.Since(start))
 		out <- br
 		close(out)
 	}()
@@ -201,11 +203,32 @@ func (db *DrandBeacon) VerifyEntry(curr types.BeaconEntry, prev types.BeaconEntr
 	return err
 }
 
-func (db *DrandBeacon) MaxBeaconRoundForEpoch(filEpoch abi.ChainEpoch) uint64 {
+func (db *DrandBeacon) MaxBeaconRoundForEpoch(nv network.Version, filEpoch abi.ChainEpoch) uint64 {
 	// TODO: sometimes the genesis time for filecoin is zero and this goes negative
 	latestTs := ((uint64(filEpoch) * db.filRoundTime) + db.filGenTime) - db.filRoundTime
+
+	if nv <= network.Version15 {
+		return db.maxBeaconRoundV1(latestTs)
+	}
+
+	return db.maxBeaconRoundV2(latestTs)
+}
+
+func (db *DrandBeacon) maxBeaconRoundV1(latestTs uint64) uint64 {
 	dround := (latestTs - db.drandGenTime) / uint64(db.interval.Seconds())
 	return dround
+}
+
+func (db *DrandBeacon) maxBeaconRoundV2(latestTs uint64) uint64 {
+	if latestTs < db.drandGenTime {
+		return 1
+	}
+
+	fromGenesis := latestTs - db.drandGenTime
+	// we take the time from genesis divided by the periods in seconds, that
+	// gives us the number of periods since genesis.  We also add +1 because
+	// round 1 starts at genesis time.
+	return fromGenesis/uint64(db.interval.Seconds()) + 1
 }
 
 var _ beacon.RandomBeacon = (*DrandBeacon)(nil)

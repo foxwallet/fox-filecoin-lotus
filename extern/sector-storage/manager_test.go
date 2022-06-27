@@ -1,3 +1,4 @@
+//stm: #unit
 package sectorstorage
 
 import (
@@ -14,6 +15,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	ffi "github.com/filecoin-project/filecoin-ffi"
+	"github.com/filecoin-project/go-state-types/proof"
 
 	"github.com/google/uuid"
 	"github.com/ipfs/go-datastore"
@@ -49,7 +53,7 @@ func newTestStorage(t *testing.T) *testStorage {
 
 	{
 		b, err := json.MarshalIndent(&stores.LocalStorageMeta{
-			ID:       stores.ID(uuid.New().String()),
+			ID:       storiface.ID(uuid.New().String()),
 			Weight:   1,
 			CanSeal:  true,
 			CanStore: true,
@@ -115,9 +119,11 @@ func newTestMgr(ctx context.Context, t *testing.T, ds datastore.Datastore) (*Man
 		remoteHnd:  &stores.FetchHandler{Local: lstor},
 		index:      si,
 
-		sched: newScheduler(),
+		sched:            newScheduler(),
+		windowPoStSched:  newPoStScheduler(sealtasks.TTGenerateWindowPoSt),
+		winningPoStSched: newPoStScheduler(sealtasks.TTGenerateWinningPoSt),
 
-		Prover: prover,
+		localProver: prover,
 
 		work:       statestore.New(ds),
 		callToWork: map[storiface.CallID]WorkID{},
@@ -314,6 +320,147 @@ func TestSnapDeals(t *testing.T) {
 
 }
 
+func TestSnarkPackV2(t *testing.T) {
+	logging.SetAllLoggers(logging.LevelWarn)
+	ctx := context.Background()
+	m, lstor, stor, idx, cleanup := newTestMgr(ctx, t, datastore.NewMapDatastore())
+	defer cleanup()
+
+	localTasks := []sealtasks.TaskType{
+		sealtasks.TTAddPiece, sealtasks.TTPreCommit1, sealtasks.TTPreCommit2, sealtasks.TTCommit1, sealtasks.TTCommit2, sealtasks.TTFinalize,
+		sealtasks.TTFetch, sealtasks.TTReplicaUpdate, sealtasks.TTProveReplicaUpdate1, sealtasks.TTProveReplicaUpdate2, sealtasks.TTUnseal,
+		sealtasks.TTRegenSectorKey,
+	}
+	wds := datastore.NewMapDatastore()
+
+	w := NewLocalWorker(WorkerConfig{TaskTypes: localTasks}, stor, lstor, idx, m, statestore.New(wds))
+	err := m.AddWorker(ctx, w)
+	require.NoError(t, err)
+
+	proofType := abi.RegisteredSealProof_StackedDrg2KiBV1
+	ptStr := os.Getenv("LOTUS_TEST_SNAP_DEALS_PROOF_TYPE")
+	switch ptStr {
+	case "2k":
+	case "8M":
+		proofType = abi.RegisteredSealProof_StackedDrg8MiBV1
+	case "512M":
+		proofType = abi.RegisteredSealProof_StackedDrg512MiBV1
+	case "32G":
+		proofType = abi.RegisteredSealProof_StackedDrg32GiBV1
+	case "64G":
+		proofType = abi.RegisteredSealProof_StackedDrg64GiBV1
+	default:
+		log.Warn("Unspecified proof type, make sure to set LOTUS_TEST_SNAP_DEALS_PROOF_TYPE to '2k', '8M', '512M', '32G' or '64G'")
+		log.Warn("Continuing test with 2k sectors")
+	}
+
+	mid := abi.ActorID(1000)
+
+	sid1 := storage.SectorRef{
+		ID:        abi.SectorID{Miner: mid, Number: 1},
+		ProofType: proofType,
+	}
+
+	sid2 := storage.SectorRef{
+		ID:        abi.SectorID{Miner: mid, Number: 2},
+		ProofType: proofType,
+	}
+
+	ss, err := proofType.SectorSize()
+	require.NoError(t, err)
+
+	unpaddedSectorSize := abi.PaddedPieceSize(ss).Unpadded()
+
+	// Pack sector with no pieces
+	p1, err := m.AddPiece(ctx, sid1, nil, unpaddedSectorSize, NewNullReader(unpaddedSectorSize))
+	require.NoError(t, err)
+	ccPieces1 := []abi.PieceInfo{p1}
+
+	p2, err := m.AddPiece(ctx, sid2, nil, unpaddedSectorSize, NewNullReader(unpaddedSectorSize))
+	require.NoError(t, err)
+	ccPieces2 := []abi.PieceInfo{p2}
+
+	// Precommit and Seal 2 CC sectors
+	fmt.Printf("PC1\n")
+
+	ticket1 := abi.SealRandomness{9, 9, 9, 9, 9, 9, 9, 9}
+	ticket2 := abi.SealRandomness{1, 9, 8, 9, 1, 9, 8, 9}
+	interactiveRandomness1 := abi.InteractiveSealRandomness{1, 9, 2, 1, 2, 5, 3, 0}
+	interactiveRandomness2 := abi.InteractiveSealRandomness{1, 5, 2, 2, 1, 5, 2, 2}
+
+	pc1Out1, err := m.SealPreCommit1(ctx, sid1, ticket1, ccPieces1)
+	require.NoError(t, err)
+	pc1Out2, err := m.SealPreCommit1(ctx, sid2, ticket2, ccPieces2)
+	require.NoError(t, err)
+
+	fmt.Printf("PC2\n")
+
+	pc2Out1, err := m.SealPreCommit2(ctx, sid1, pc1Out1)
+	require.NoError(t, err)
+	pc2Out2, err := m.SealPreCommit2(ctx, sid2, pc1Out2)
+	require.NoError(t, err)
+
+	// Commit the sector
+
+	fmt.Printf("C1\n")
+
+	c1Out1, err := m.SealCommit1(ctx, sid1, ticket1, interactiveRandomness1, ccPieces1, pc2Out1)
+	require.NoError(t, err)
+	c1Out2, err := m.SealCommit1(ctx, sid2, ticket2, interactiveRandomness2, ccPieces2, pc2Out2)
+	require.NoError(t, err)
+
+	fmt.Printf("C2\n")
+
+	c2Out1, err := m.SealCommit2(ctx, sid1, c1Out1)
+	require.NoError(t, err)
+	c2Out2, err := m.SealCommit2(ctx, sid2, c1Out2)
+	require.NoError(t, err)
+
+	fmt.Println("Aggregate")
+	agg, err := ffi.AggregateSealProofs(proof.AggregateSealVerifyProofAndInfos{
+		Miner:          mid,
+		SealProof:      proofType,
+		AggregateProof: abi.RegisteredAggregationProof_SnarkPackV2,
+		Infos: []proof.AggregateSealVerifyInfo{{
+			Number:                sid1.ID.Number,
+			Randomness:            ticket1,
+			InteractiveRandomness: interactiveRandomness1,
+			SealedCID:             pc2Out1.Sealed,
+			UnsealedCID:           pc2Out1.Unsealed,
+		}, {
+			Number:                sid2.ID.Number,
+			Randomness:            ticket2,
+			InteractiveRandomness: interactiveRandomness2,
+			SealedCID:             pc2Out2.Sealed,
+			UnsealedCID:           pc2Out2.Unsealed,
+		}},
+	}, [][]byte{c2Out1, c2Out2})
+	require.NoError(t, err)
+
+	fmt.Println("Verifying aggregate")
+	ret, err := ffi.VerifyAggregateSeals(proof.AggregateSealVerifyProofAndInfos{
+		Miner:          mid,
+		SealProof:      proofType,
+		AggregateProof: abi.RegisteredAggregationProof_SnarkPackV2,
+		Proof:          agg,
+		Infos: []proof.AggregateSealVerifyInfo{{
+			Number:                sid1.ID.Number,
+			Randomness:            ticket1,
+			InteractiveRandomness: interactiveRandomness1,
+			SealedCID:             pc2Out1.Sealed,
+			UnsealedCID:           pc2Out1.Unsealed,
+		}, {
+			Number:                sid2.ID.Number,
+			Randomness:            ticket2,
+			InteractiveRandomness: interactiveRandomness2,
+			SealedCID:             pc2Out2.Sealed,
+			UnsealedCID:           pc2Out2.Unsealed,
+		}},
+	})
+	require.NoError(t, err)
+	require.True(t, ret, "proof should be good")
+}
+
 func TestRedoPC1(t *testing.T) {
 	logging.SetAllLoggers(logging.LevelDebug)
 
@@ -363,6 +510,7 @@ func TestRedoPC1(t *testing.T) {
 
 // Manager restarts in the middle of a task, restarts it, it completes
 func TestRestartManager(t *testing.T) {
+	//stm: @WORKER_JOBS_001
 	test := func(returnBeforeCall bool) func(*testing.T) {
 		return func(t *testing.T) {
 			logging.SetAllLoggers(logging.LevelDebug)
@@ -507,8 +655,9 @@ func TestRestartWorker(t *testing.T) {
 	<-arch
 	require.NoError(t, w.Close())
 
+	//stm: @WORKER_STATS_001
 	for {
-		if len(m.WorkerStats()) == 0 {
+		if len(m.WorkerStats(ctx)) == 0 {
 			break
 		}
 
@@ -569,14 +718,15 @@ func TestReenableWorker(t *testing.T) {
 	// disable
 	atomic.StoreInt64(&w.testDisable, 1)
 
+	//stm: @WORKER_STATS_001
 	for i := 0; i < 100; i++ {
-		if !m.WorkerStats()[w.session].Enabled {
+		if !m.WorkerStats(ctx)[w.session].Enabled {
 			break
 		}
 
 		time.Sleep(time.Millisecond * 3)
 	}
-	require.False(t, m.WorkerStats()[w.session].Enabled)
+	require.False(t, m.WorkerStats(ctx)[w.session].Enabled)
 
 	i, _ = m.sched.Info(ctx)
 	require.Len(t, i.(SchedDiagInfo).OpenWindows, 0)
@@ -585,13 +735,13 @@ func TestReenableWorker(t *testing.T) {
 	atomic.StoreInt64(&w.testDisable, 0)
 
 	for i := 0; i < 100; i++ {
-		if m.WorkerStats()[w.session].Enabled {
+		if m.WorkerStats(ctx)[w.session].Enabled {
 			break
 		}
 
 		time.Sleep(time.Millisecond * 3)
 	}
-	require.True(t, m.WorkerStats()[w.session].Enabled)
+	require.True(t, m.WorkerStats(ctx)[w.session].Enabled)
 
 	for i := 0; i < 100; i++ {
 		info, _ := m.sched.Info(ctx)
@@ -647,7 +797,7 @@ func TestResUse(t *testing.T) {
 
 l:
 	for {
-		st := m.WorkerStats()
+		st := m.WorkerStats(ctx)
 		require.Len(t, st, 1)
 		for _, w := range st {
 			if w.MemUsedMax > 0 {
@@ -657,7 +807,7 @@ l:
 		}
 	}
 
-	st := m.WorkerStats()
+	st := m.WorkerStats(ctx)
 	require.Len(t, st, 1)
 	for _, w := range st {
 		require.Equal(t, storiface.ResourceTable[sealtasks.TTAddPiece][abi.RegisteredSealProof_StackedDrg2KiBV1].MaxMemory, w.MemUsedMax)
@@ -709,7 +859,7 @@ func TestResOverride(t *testing.T) {
 
 l:
 	for {
-		st := m.WorkerStats()
+		st := m.WorkerStats(ctx)
 		require.Len(t, st, 1)
 		for _, w := range st {
 			if w.MemUsedMax > 0 {
@@ -719,7 +869,7 @@ l:
 		}
 	}
 
-	st := m.WorkerStats()
+	st := m.WorkerStats(ctx)
 	require.Len(t, st, 1)
 	for _, w := range st {
 		require.Equal(t, uint64(99999), w.MemUsedMax)

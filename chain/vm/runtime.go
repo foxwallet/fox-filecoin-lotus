@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
 	gruntime "runtime"
 	"time"
 
@@ -28,7 +29,9 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/lotus/build"
+	"github.com/filecoin-project/lotus/chain/actors"
 	"github.com/filecoin-project/lotus/chain/actors/aerrors"
+	"github.com/filecoin-project/lotus/chain/actors/builtin"
 	"github.com/filecoin-project/lotus/chain/state"
 	"github.com/filecoin-project/lotus/chain/types"
 )
@@ -55,8 +58,8 @@ func (m *Message) ValueReceived() abi.TokenAmount {
 	return m.msg.Value
 }
 
-// EnableGasTracing, if true, outputs gas tracing in execution traces.
-var EnableGasTracing = false
+// EnableDetailedTracing, if true, outputs gas tracing in execution traces.
+var EnableDetailedTracing = os.Getenv("LOTUS_VM_ENABLE_TRACING") == "1"
 
 type Runtime struct {
 	rt7.Message
@@ -64,7 +67,7 @@ type Runtime struct {
 
 	ctx context.Context
 
-	vm        *VM
+	vm        *LegacyVM
 	state     *state.StateTree
 	height    abi.ChainEpoch
 	cst       ipldcbor.IpldStore
@@ -91,7 +94,7 @@ func (rt *Runtime) BaseFee() abi.TokenAmount {
 }
 
 func (rt *Runtime) NetworkVersion() network.Version {
-	return rt.vm.GetNtwkVersion(rt.ctx, rt.CurrEpoch())
+	return rt.vm.networkVersion
 }
 
 func (rt *Runtime) TotalFilCircSupply() abi.TokenAmount {
@@ -157,7 +160,7 @@ func (rt *Runtime) shimCall(f func() interface{}) (rval []byte, aerr aerrors.Act
 	defer func() {
 		if r := recover(); r != nil {
 			if ar, ok := r.(aerrors.ActorError); ok {
-				log.Warnf("VM.Call failure in call from: %s to %s: %+v", rt.Caller(), rt.Receiver(), ar)
+				log.Warnf("LegacyVM.Call failure in call from: %s to %s: %+v", rt.Caller(), rt.Receiver(), ar)
 				aerr = ar
 				return
 			}
@@ -223,16 +226,7 @@ func (rt *Runtime) GetActorCodeCID(addr address.Address) (ret cid.Cid, ok bool) 
 }
 
 func (rt *Runtime) GetRandomnessFromTickets(personalization crypto.DomainSeparationTag, randEpoch abi.ChainEpoch, entropy []byte) abi.Randomness {
-	var err error
-	var res []byte
-
-	rnv := rt.vm.ntwkVersion(rt.ctx, randEpoch)
-
-	if rnv >= network.Version13 {
-		res, err = rt.vm.rand.GetChainRandomnessV2(rt.ctx, personalization, randEpoch, entropy)
-	} else {
-		res, err = rt.vm.rand.GetChainRandomnessV1(rt.ctx, personalization, randEpoch, entropy)
-	}
+	res, err := rt.vm.rand.GetChainRandomness(rt.ctx, personalization, randEpoch, entropy)
 
 	if err != nil {
 		panic(aerrors.Fatalf("could not get ticket randomness: %s", err))
@@ -241,17 +235,7 @@ func (rt *Runtime) GetRandomnessFromTickets(personalization crypto.DomainSeparat
 }
 
 func (rt *Runtime) GetRandomnessFromBeacon(personalization crypto.DomainSeparationTag, randEpoch abi.ChainEpoch, entropy []byte) abi.Randomness {
-	var err error
-	var res []byte
-
-	rnv := rt.vm.ntwkVersion(rt.ctx, randEpoch)
-	if rnv >= network.Version14 {
-		res, err = rt.vm.rand.GetBeaconRandomnessV3(rt.ctx, personalization, randEpoch, entropy)
-	} else if rnv == network.Version13 {
-		res, err = rt.vm.rand.GetBeaconRandomnessV2(rt.ctx, personalization, randEpoch, entropy)
-	} else {
-		res, err = rt.vm.rand.GetBeaconRandomnessV1(rt.ctx, personalization, randEpoch, entropy)
-	}
+	res, err := rt.vm.rand.GetBeaconRandomness(rt.ctx, personalization, randEpoch, entropy)
 
 	if err != nil {
 		panic(aerrors.Fatalf("could not get beacon randomness: %s", err))
@@ -382,6 +366,20 @@ func (rt *Runtime) ValidateImmediateCallerType(ts ...cid.Cid) {
 	for _, t := range ts {
 		if t == callerCid {
 			return
+		}
+
+		// this really only for genesis in tests; nv16 will be running on FVM anyway.
+		if nv := rt.NetworkVersion(); nv >= network.Version16 {
+			av, err := actors.VersionForNetwork(nv)
+			if err != nil {
+				panic(aerrors.Fatalf("failed to get actors version for network version %d", nv))
+			}
+
+			name := actors.CanonicalName(builtin.ActorNameByCode(t))
+			ac, ok := actors.GetActorCodeID(av, name)
+			if ok && ac == callerCid {
+				return
+			}
 		}
 	}
 	rt.Abortf(exitcode.SysErrForbidden, "caller cid type %q was not one of %v", callerCid, ts)
@@ -534,7 +532,7 @@ func (rt *Runtime) stateCommit(oldh, newh cid.Cid) aerrors.ActorError {
 }
 
 func (rt *Runtime) finilizeGasTracing() {
-	if EnableGasTracing {
+	if EnableDetailedTracing {
 		if rt.lastGasCharge != nil {
 			rt.lastGasCharge.TimeTaken = time.Since(rt.lastGasChargeTime)
 		}
@@ -568,7 +566,7 @@ func (rt *Runtime) chargeGasFunc(skip int) func(GasCharge) {
 
 func (rt *Runtime) chargeGasInternal(gas GasCharge, skip int) aerrors.ActorError {
 	toUse := gas.Total()
-	if EnableGasTracing {
+	if EnableDetailedTracing {
 		var callers [10]uintptr
 
 		cout := gruntime.Callers(2+skip, callers[:])

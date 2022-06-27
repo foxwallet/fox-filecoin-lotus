@@ -7,7 +7,8 @@ import (
 	"io"
 	"strconv"
 
-	"github.com/filecoin-project/lotus/chain/actors/builtin"
+	"github.com/filecoin-project/go-state-types/builtin"
+	lbuiltin "github.com/filecoin-project/lotus/chain/actors/builtin"
 
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/lotus/chain/types"
@@ -84,7 +85,7 @@ var terminationsCmd = &cli.Command{
 		cst := cbor.NewCborStore(bs)
 		store := adt.WrapStore(ctx, cst)
 
-		blk, err := cs.GetBlock(blkCid)
+		blk, err := cs.GetBlock(ctx, blkCid)
 		if err != nil {
 			return err
 		}
@@ -97,21 +98,21 @@ var terminationsCmd = &cli.Command{
 		cutoff := blk.Height - abi.ChainEpoch(lbp)
 
 		for blk.Height > cutoff {
-			pts, err := cs.LoadTipSet(types.NewTipSetKey(blk.Parents...))
+			pts, err := cs.LoadTipSet(ctx, types.NewTipSetKey(blk.Parents...))
 			if err != nil {
 				return err
 			}
 
 			blk = pts.Blocks()[0]
 
-			msgs, err := cs.MessagesForTipset(pts)
+			msgs, err := cs.MessagesForTipset(ctx, pts)
 			if err != nil {
 				return err
 			}
 
 			for _, v := range msgs {
 				msg := v.VMMessage()
-				if msg.Method != miner.Methods.TerminateSectors {
+				if msg.Method != builtin.MethodsMiner.TerminateSectors {
 					continue
 				}
 
@@ -125,7 +126,7 @@ var terminationsCmd = &cli.Command{
 					return err
 				}
 
-				if !builtin.IsStorageMinerActor(minerAct.Code) {
+				if !lbuiltin.IsStorageMinerActor(minerAct.Code) {
 					continue
 				}
 
@@ -167,8 +168,16 @@ var terminationsCmd = &cli.Command{
 							if err != nil {
 								return err
 							}
+							label, err := prop.Label.ToString()
+							if err != nil {
+								labelBs, err := prop.Label.ToBytes()
+								if err != nil {
+									return err
+								}
+								label = string(labelBs)
+							}
 							if find {
-								fmt.Printf("%s, %d, %d, %s, %s, %s\n", msg.To, sector.SectorNumber, deal, prop.Client, prop.PieceCID, prop.Label)
+								fmt.Printf("%s, %d, %d, %s, %s, %s\n", msg.To, sector.SectorNumber, deal, prop.Client, prop.PieceCID, label)
 							}
 						}
 					}

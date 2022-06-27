@@ -11,8 +11,8 @@ import (
 	"github.com/filecoin-project/go-state-types/exitcode"
 	"github.com/filecoin-project/specs-storage/storage"
 
+	"github.com/filecoin-project/go-state-types/builtin/v8/miner"
 	"github.com/filecoin-project/lotus/api"
-	"github.com/filecoin-project/lotus/chain/actors/builtin/miner"
 	sectorstorage "github.com/filecoin-project/lotus/extern/sector-storage"
 	"github.com/filecoin-project/lotus/extern/storage-sealing/sealiface"
 )
@@ -165,11 +165,11 @@ func (t *SectorInfo) sealingCtx(ctx context.Context) context.Context {
 
 // Returns list of offset/length tuples of sector data ranges which clients
 // requested to keep unsealed
-func (t *SectorInfo) keepUnsealedRanges(invert, alwaysKeep bool) []storage.Range {
+func (t *SectorInfo) keepUnsealedRanges(pieces []Piece, invert, alwaysKeep bool) []storage.Range {
 	var out []storage.Range
 
 	var at abi.UnpaddedPieceSize
-	for _, piece := range t.Pieces {
+	for _, piece := range pieces {
 		psize := piece.Piece.Size.Unpadded()
 		at += psize
 

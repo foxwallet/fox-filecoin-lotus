@@ -7,10 +7,11 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/builtin"
+	"github.com/filecoin-project/go-state-types/builtin/v8/market"
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/build"
 	"github.com/filecoin-project/lotus/chain/actors"
-	"github.com/filecoin-project/lotus/chain/actors/builtin/market"
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/node/impl/full"
 	"github.com/filecoin-project/lotus/node/modules/dtypes"
@@ -89,7 +90,7 @@ func (fm *FundManager) Start() error {
 	// - in State() only load addresses with in-progress messages
 	// - load the others just-in-time from getFundedAddress
 	// - delete(fm.fundedAddrs, addr) when the queue has been processed
-	return fm.str.forEach(func(state *FundedAddressState) {
+	return fm.str.forEach(fm.ctx, func(state *FundedAddressState) {
 		fa := newFundedAddress(fm, state.Addr)
 		fa.state = state
 		fm.fundedAddrs[fa.state.Addr] = fa
@@ -322,7 +323,7 @@ func (a *fundedAddress) clearWaitState() {
 // Save state to datastore
 func (a *fundedAddress) saveState() {
 	// Not much we can do if saving to the datastore fails, just log
-	err := a.str.save(a.state)
+	err := a.str.save(a.ctx, a.state)
 	if err != nil {
 		log.Errorf("saving state to store for addr %s: %v", a.state.Addr, err)
 	}
@@ -677,10 +678,10 @@ func (env *fundManagerEnvironment) AddFunds(
 	}
 
 	smsg, aerr := env.api.MpoolPushMessage(ctx, &types.Message{
-		To:     market.Address,
+		To:     builtin.StorageMarketActorAddr,
 		From:   wallet,
 		Value:  amt,
-		Method: market.Methods.AddBalance,
+		Method: builtin.MethodsMarket.AddBalance,
 		Params: params,
 	}, nil)
 
@@ -706,10 +707,10 @@ func (env *fundManagerEnvironment) WithdrawFunds(
 	}
 
 	smsg, aerr := env.api.MpoolPushMessage(ctx, &types.Message{
-		To:     market.Address,
+		To:     builtin.StorageMarketActorAddr,
 		From:   wallet,
 		Value:  types.NewInt(0),
-		Method: market.Methods.WithdrawBalance,
+		Method: builtin.MethodsMarket.WithdrawBalance,
 		Params: params,
 	}, nil)
 

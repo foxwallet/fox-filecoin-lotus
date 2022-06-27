@@ -1,3 +1,4 @@
+//stm: #unit
 package market
 
 import (
@@ -6,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	markettypes "github.com/filecoin-project/go-state-types/builtin/v8/market"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
@@ -22,6 +25,7 @@ import (
 
 // TestFundManagerBasic verifies that the basic fund manager operations work
 func TestFundManagerBasic(t *testing.T) {
+	//stm: @MARKET_RESERVE_FUNDS_001, @MARKET_RELEASE_FUNDS_001, @MARKET_WITHDRAW_FUNDS_001
 	s := setup(t)
 	defer s.fm.Stop()
 
@@ -106,6 +110,7 @@ func TestFundManagerBasic(t *testing.T) {
 
 // TestFundManagerParallel verifies that operations can be run in parallel
 func TestFundManagerParallel(t *testing.T) {
+	//stm: @MARKET_RESERVE_FUNDS_001, @MARKET_RELEASE_FUNDS_001, @MARKET_WITHDRAW_FUNDS_001
 	s := setup(t)
 	defer s.fm.Stop()
 
@@ -197,6 +202,7 @@ func TestFundManagerParallel(t *testing.T) {
 
 // TestFundManagerReserveByWallet verifies that reserve requests are grouped by wallet
 func TestFundManagerReserveByWallet(t *testing.T) {
+	//stm: @MARKET_RESERVE_FUNDS_001
 	s := setup(t)
 	defer s.fm.Stop()
 
@@ -290,6 +296,7 @@ func TestFundManagerReserveByWallet(t *testing.T) {
 // TestFundManagerWithdrawal verifies that as many withdraw operations as
 // possible are processed
 func TestFundManagerWithdrawalLimit(t *testing.T) {
+	//stm: @MARKET_RESERVE_FUNDS_001, @MARKET_RELEASE_FUNDS_001, @MARKET_WITHDRAW_FUNDS_001
 	s := setup(t)
 	defer s.fm.Stop()
 
@@ -384,6 +391,7 @@ func TestFundManagerWithdrawalLimit(t *testing.T) {
 
 // TestFundManagerWithdrawByWallet verifies that withdraw requests are grouped by wallet
 func TestFundManagerWithdrawByWallet(t *testing.T) {
+	//stm: @MARKET_RESERVE_FUNDS_001, @MARKET_RELEASE_FUNDS_001, @MARKET_WITHDRAW_FUNDS_001
 	s := setup(t)
 	defer s.fm.Stop()
 
@@ -493,6 +501,7 @@ func TestFundManagerWithdrawByWallet(t *testing.T) {
 // TestFundManagerRestart verifies that waiting for incomplete requests resumes
 // on restart
 func TestFundManagerRestart(t *testing.T) {
+	//stm: @MARKET_RESERVE_FUNDS_001
 	s := setup(t)
 	defer s.fm.Stop()
 
@@ -559,6 +568,7 @@ func TestFundManagerRestart(t *testing.T) {
 // 3. Deal B completes, reducing addr1 by 7:      reserved       12    available 12 ->  5
 // 4. Deal A releases 5 from addr1:               reserved 12 ->  7    available        5
 func TestFundManagerReleaseAfterPublish(t *testing.T) {
+	//stm: @MARKET_RESERVE_FUNDS_001, @MARKET_RELEASE_FUNDS_001
 	s := setup(t)
 	defer s.fm.Stop()
 
@@ -654,7 +664,7 @@ func checkWithdrawMessageFields(t *testing.T, msg *types.Message, from address.A
 	require.Equal(t, market.Address, msg.To)
 	require.Equal(t, abi.NewTokenAmount(0), msg.Value)
 
-	var params market.WithdrawBalanceParams
+	var params markettypes.WithdrawBalanceParams
 	err := params.UnmarshalCBOR(bytes.NewReader(msg.Params))
 	require.NoError(t, err)
 	require.Equal(t, addr, params.ProviderOrClientAddress)
@@ -734,7 +744,7 @@ func (mapi *mockFundManagerAPI) completeMsg(msgCid cid.Cid) {
 			mapi.escrow[escrowAcct] = escrow
 			log.Debugf("%s:   escrow %d -> %d", escrowAcct, before, escrow)
 		} else {
-			var params market.WithdrawBalanceParams
+			var params markettypes.WithdrawBalanceParams
 			err := params.UnmarshalCBOR(bytes.NewReader(pmsg.msg.Message.Params))
 			if err != nil {
 				panic(err)

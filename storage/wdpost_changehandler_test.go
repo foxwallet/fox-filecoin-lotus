@@ -1,3 +1,4 @@
+//stm: #unit
 package storage
 
 import (
@@ -6,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	minertypes "github.com/filecoin-project/go-state-types/builtin/v8/miner"
 
 	tutils "github.com/filecoin-project/specs-actors/support/testing"
 
@@ -17,7 +20,6 @@ import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/dline"
-	"github.com/filecoin-project/lotus/chain/actors/builtin/miner"
 	"github.com/filecoin-project/lotus/chain/types"
 )
 
@@ -28,7 +30,7 @@ func init() {
 }
 
 type proveRes struct {
-	posts []miner.SubmitWindowedPoStParams
+	posts []minertypes.SubmitWindowedPoStParams
 	err   error
 }
 
@@ -84,10 +86,10 @@ func (m *mockAPI) setDeadline(di *dline.Info) {
 }
 
 func (m *mockAPI) getDeadline(currentEpoch abi.ChainEpoch) *dline.Info {
-	close := miner.WPoStChallengeWindow - 1
+	close := minertypes.WPoStChallengeWindow - 1
 	dlIdx := uint64(0)
 	for close < currentEpoch {
-		close += miner.WPoStChallengeWindow
+		close += minertypes.WPoStChallengeWindow
 		dlIdx++
 	}
 	return NewDeadlineInfo(0, dlIdx, currentEpoch)
@@ -160,7 +162,7 @@ func (m *mockAPI) startSubmitPoST(
 	ctx context.Context,
 	ts *types.TipSet,
 	deadline *dline.Info,
-	posts []miner.SubmitWindowedPoStParams,
+	posts []minertypes.SubmitWindowedPoStParams,
 	completeSubmitPoST CompleteSubmitPoSTCb,
 ) context.CancelFunc {
 	ctx, cancel := context.WithCancel(ctx)
@@ -200,6 +202,10 @@ func (m *mockAPI) setChangeHandler(ch *changeHandler) {
 
 // TestChangeHandlerBasic verifies we can generate a proof and submit it
 func TestChangeHandlerBasic(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_PROCESS_RESULTS_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -220,7 +226,7 @@ func TestChangeHandlerBasic(t *testing.T) {
 	require.Equal(t, SubmitStateStart, s.submitState(di))
 
 	// Send a response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: di.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: di.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -248,6 +254,10 @@ func TestChangeHandlerBasic(t *testing.T) {
 // chain is already advanced past the confidence interval, we should move from
 // proving to submitting without a head change in between.
 func TestChangeHandlerFromProvingToSubmittingNoHeadChange(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_005
+	//stm: @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -282,7 +292,7 @@ func TestChangeHandlerFromProvingToSubmittingNoHeadChange(t *testing.T) {
 	require.Equal(t, SubmitStateStart, s.submitState(di))
 
 	// Send a response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: di.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: di.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -299,6 +309,10 @@ func TestChangeHandlerFromProvingToSubmittingNoHeadChange(t *testing.T) {
 // proofs generated we should not submit anything to chain but submit state
 // should move to completed
 func TestChangeHandlerFromProvingEmptyProofsToComplete(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_005, @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_006
+	//stm: @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -333,7 +347,7 @@ func TestChangeHandlerFromProvingEmptyProofsToComplete(t *testing.T) {
 	require.Equal(t, SubmitStateStart, s.submitState(di))
 
 	// Send a response to the call to generate proofs with an empty proofs array
-	posts := []miner.SubmitWindowedPoStParams{}
+	posts := []minertypes.SubmitWindowedPoStParams{}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -349,10 +363,13 @@ func TestChangeHandlerFromProvingEmptyProofsToComplete(t *testing.T) {
 // TestChangeHandlerDontStartUntilProvingPeriod tests that the handler
 // ignores updates until the proving period has been reached.
 func TestChangeHandlerDontStartUntilProvingPeriod(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004
 	s := makeScaffolding(t)
 	mock := s.mock
 
-	periodStart := miner.WPoStProvingPeriod
+	periodStart := minertypes.WPoStProvingPeriod
 	dlIdx := uint64(1)
 	currentEpoch := abi.ChainEpoch(10)
 	di := NewDeadlineInfo(periodStart, dlIdx, currentEpoch)
@@ -374,7 +391,7 @@ func TestChangeHandlerDontStartUntilProvingPeriod(t *testing.T) {
 	}
 
 	// Advance the head to the next proving period's first epoch
-	currentEpoch = periodStart + miner.WPoStChallengeWindow
+	currentEpoch = periodStart + minertypes.WPoStChallengeWindow
 	di = NewDeadlineInfo(periodStart, dlIdx, currentEpoch)
 	mock.setDeadline(di)
 	go triggerHeadAdvance(t, s, currentEpoch)
@@ -387,6 +404,9 @@ func TestChangeHandlerDontStartUntilProvingPeriod(t *testing.T) {
 // TestChangeHandlerStartProvingNextDeadline verifies that the proof handler
 // starts proving the next deadline after the current one
 func TestChangeHandlerStartProvingNextDeadline(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -412,7 +432,7 @@ func TestChangeHandlerStartProvingNextDeadline(t *testing.T) {
 	require.Equal(t, postStatusProving, s.mock.getPostStatus(di))
 
 	// Send a response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: di.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: di.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -436,6 +456,10 @@ func TestChangeHandlerStartProvingNextDeadline(t *testing.T) {
 // TestChangeHandlerProvingRounds verifies we can generate several rounds of
 // proofs as the chain head advances
 func TestChangeHandlerProvingRounds(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_002, @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_003, @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_005
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -443,7 +467,7 @@ func TestChangeHandlerProvingRounds(t *testing.T) {
 	s.ch.start()
 
 	completeProofIndex := abi.ChainEpoch(10)
-	for currentEpoch := abi.ChainEpoch(1); currentEpoch < miner.WPoStChallengeWindow*5; currentEpoch++ {
+	for currentEpoch := abi.ChainEpoch(1); currentEpoch < minertypes.WPoStChallengeWindow*5; currentEpoch++ {
 		// Trigger a head change
 		di := mock.getDeadline(currentEpoch)
 		go triggerHeadAdvance(t, s, currentEpoch+ChallengeConfidence)
@@ -484,7 +508,7 @@ func TestChangeHandlerProvingRounds(t *testing.T) {
 
 		if currentEpoch == completeProofEpoch {
 			// Send a response to the call to generate proofs
-			posts := []miner.SubmitWindowedPoStParams{{Deadline: di.Index}}
+			posts := []minertypes.SubmitWindowedPoStParams{{Deadline: di.Index}}
 			mock.proveResult <- &proveRes{posts: posts}
 
 			// Should move to proving complete
@@ -506,6 +530,9 @@ func TestChangeHandlerProvingRounds(t *testing.T) {
 // TestChangeHandlerProvingErrorRecovery verifies that the proof handler
 // recovers correctly from an error
 func TestChangeHandlerProvingErrorRecovery(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -536,7 +563,7 @@ func TestChangeHandlerProvingErrorRecovery(t *testing.T) {
 	require.Equal(t, postStatusProving, s.mock.getPostStatus(di))
 
 	// Send a success response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: di.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: di.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -547,6 +574,10 @@ func TestChangeHandlerProvingErrorRecovery(t *testing.T) {
 // TestChangeHandlerSubmitErrorRecovery verifies that the submit handler
 // recovers correctly from an error
 func TestChangeHandlerSubmitErrorRecovery(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_PROCESS_RESULTS_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -567,7 +598,7 @@ func TestChangeHandlerSubmitErrorRecovery(t *testing.T) {
 	require.Equal(t, SubmitStateStart, s.submitState(di))
 
 	// Send a response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: di.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: di.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -616,6 +647,9 @@ func TestChangeHandlerSubmitErrorRecovery(t *testing.T) {
 // TestChangeHandlerProveExpiry verifies that the prove handler
 // behaves correctly on expiry
 func TestChangeHandlerProveExpiry(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -632,7 +666,7 @@ func TestChangeHandlerProveExpiry(t *testing.T) {
 	require.Equal(t, postStatusProving, s.mock.getPostStatus(di))
 
 	// Move to a height that expires the current proof
-	currentEpoch = miner.WPoStChallengeWindow
+	currentEpoch = minertypes.WPoStChallengeWindow
 	di = mock.getDeadline(currentEpoch)
 	go triggerHeadAdvance(t, s, currentEpoch)
 
@@ -643,7 +677,7 @@ func TestChangeHandlerProveExpiry(t *testing.T) {
 	require.True(t, mock.wasAbortCalled())
 
 	// Send a response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: di.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: di.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -654,6 +688,9 @@ func TestChangeHandlerProveExpiry(t *testing.T) {
 // TestChangeHandlerSubmitExpiry verifies that the submit handler
 // behaves correctly on expiry
 func TestChangeHandlerSubmitExpiry(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_002, @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -673,7 +710,7 @@ func TestChangeHandlerSubmitExpiry(t *testing.T) {
 	require.Equal(t, SubmitStateStart, s.submitState(di))
 
 	// Send a response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: di.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: di.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -690,7 +727,7 @@ func TestChangeHandlerSubmitExpiry(t *testing.T) {
 	require.Equal(t, SubmitStateSubmitting, s.submitState(di))
 
 	// Move to a height that expires the submit
-	currentEpoch = miner.WPoStChallengeWindow
+	currentEpoch = minertypes.WPoStChallengeWindow
 	di = mock.getDeadline(currentEpoch)
 	go triggerHeadAdvance(t, s, currentEpoch)
 
@@ -717,6 +754,9 @@ func TestChangeHandlerSubmitExpiry(t *testing.T) {
 // TestChangeHandlerProveRevert verifies that the prove handler
 // behaves correctly on revert
 func TestChangeHandlerProveRevert(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -724,7 +764,7 @@ func TestChangeHandlerProveRevert(t *testing.T) {
 	s.ch.start()
 
 	// Trigger a head change
-	currentEpoch := miner.WPoStChallengeWindow
+	currentEpoch := minertypes.WPoStChallengeWindow
 	go triggerHeadAdvance(t, s, currentEpoch)
 
 	// Should start proving
@@ -741,7 +781,7 @@ func TestChangeHandlerProveRevert(t *testing.T) {
 	require.Equal(t, postStatusProving, s.mock.getPostStatus(di))
 
 	// Send a response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: di.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: di.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -753,6 +793,10 @@ func TestChangeHandlerProveRevert(t *testing.T) {
 // TestChangeHandlerSubmittingRevert verifies that the submit handler
 // behaves correctly when there's a revert from the submitting state
 func TestChangeHandlerSubmittingRevert(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_PROCESS_RESULTS_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -763,7 +807,7 @@ func TestChangeHandlerSubmittingRevert(t *testing.T) {
 	s.ch.start()
 
 	// Trigger a head change
-	currentEpoch := miner.WPoStChallengeWindow
+	currentEpoch := minertypes.WPoStChallengeWindow
 	go triggerHeadAdvance(t, s, currentEpoch)
 
 	// Submitter doesn't have anything to do yet
@@ -772,7 +816,7 @@ func TestChangeHandlerSubmittingRevert(t *testing.T) {
 	require.Equal(t, SubmitStateStart, s.submitState(di))
 
 	// Send a response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: di.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: di.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -824,6 +868,10 @@ func TestChangeHandlerSubmittingRevert(t *testing.T) {
 // TestChangeHandlerSubmitCompleteRevert verifies that the submit handler
 // behaves correctly when there's a revert from the submit complete state
 func TestChangeHandlerSubmitCompleteRevert(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_PROCESS_RESULTS_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -834,7 +882,7 @@ func TestChangeHandlerSubmitCompleteRevert(t *testing.T) {
 	s.ch.start()
 
 	// Trigger a head change
-	currentEpoch := miner.WPoStChallengeWindow
+	currentEpoch := minertypes.WPoStChallengeWindow
 	go triggerHeadAdvance(t, s, currentEpoch)
 
 	// Submitter doesn't have anything to do yet
@@ -843,7 +891,7 @@ func TestChangeHandlerSubmitCompleteRevert(t *testing.T) {
 	require.Equal(t, SubmitStateStart, s.submitState(di))
 
 	// Send a response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: di.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: di.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -885,6 +933,10 @@ func TestChangeHandlerSubmitCompleteRevert(t *testing.T) {
 // TestChangeHandlerSubmitRevertTwoEpochs verifies that the submit handler
 // behaves correctly when the revert is two epochs deep
 func TestChangeHandlerSubmitRevertTwoEpochs(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_002,  @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_PROCESS_RESULTS_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -895,7 +947,7 @@ func TestChangeHandlerSubmitRevertTwoEpochs(t *testing.T) {
 	s.ch.start()
 
 	// Trigger a head change
-	currentEpoch := miner.WPoStChallengeWindow
+	currentEpoch := minertypes.WPoStChallengeWindow
 	go triggerHeadAdvance(t, s, currentEpoch)
 
 	// Submitter doesn't have anything to do yet
@@ -904,7 +956,7 @@ func TestChangeHandlerSubmitRevertTwoEpochs(t *testing.T) {
 	require.Equal(t, SubmitStateStart, s.submitState(diE1))
 
 	// Send a response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: diE1.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: diE1.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -930,7 +982,7 @@ func TestChangeHandlerSubmitRevertTwoEpochs(t *testing.T) {
 
 	// Should start proving epoch 2
 	// Send a response to the call to generate proofs
-	postsE2 := []miner.SubmitWindowedPoStParams{{Deadline: diE2.Index}}
+	postsE2 := []minertypes.SubmitWindowedPoStParams{{Deadline: diE2.Index}}
 	mock.proveResult <- &proveRes{posts: postsE2}
 
 	// Should move to proving complete for epoch 2
@@ -986,6 +1038,10 @@ func TestChangeHandlerSubmitRevertTwoEpochs(t *testing.T) {
 // behaves correctly when the revert is two epochs deep and the advance is
 // to a lower height than before
 func TestChangeHandlerSubmitRevertAdvanceLess(t *testing.T) {
+	//stm: @WDPOST_CHANGE_HANDLER_START_001, @WDPOST_CHANGE_HANDLER_UPDATE_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_001, @WDPOST_SUBMIT_HANDLER_PROCESS_HEAD_CHANGE_PW_001
+	//stm: @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_004, @WDPOST_SUBMIT_HANDLER_SUBMIT_IF_READY_002,  @WDPOST_PROVE_HANDLER_PROCESS_POST_RESULT_001
+	//stm: @WDPOST_SUBMIT_HANDLER_PROCESS_PROCESS_RESULTS_001
 	s := makeScaffolding(t)
 	mock := s.mock
 
@@ -996,7 +1052,7 @@ func TestChangeHandlerSubmitRevertAdvanceLess(t *testing.T) {
 	s.ch.start()
 
 	// Trigger a head change
-	currentEpoch := miner.WPoStChallengeWindow
+	currentEpoch := minertypes.WPoStChallengeWindow
 	go triggerHeadAdvance(t, s, currentEpoch)
 
 	// Submitter doesn't have anything to do yet
@@ -1005,7 +1061,7 @@ func TestChangeHandlerSubmitRevertAdvanceLess(t *testing.T) {
 	require.Equal(t, SubmitStateStart, s.submitState(diE1))
 
 	// Send a response to the call to generate proofs
-	posts := []miner.SubmitWindowedPoStParams{{Deadline: diE1.Index}}
+	posts := []minertypes.SubmitWindowedPoStParams{{Deadline: diE1.Index}}
 	mock.proveResult <- &proveRes{posts: posts}
 
 	// Should move to proving complete
@@ -1031,7 +1087,7 @@ func TestChangeHandlerSubmitRevertAdvanceLess(t *testing.T) {
 
 	// Should start proving epoch 2
 	// Send a response to the call to generate proofs
-	postsE2 := []miner.SubmitWindowedPoStParams{{Deadline: diE2.Index}}
+	postsE2 := []minertypes.SubmitWindowedPoStParams{{Deadline: diE2.Index}}
 	mock.proveResult <- &proveRes{posts: postsE2}
 
 	// Should move to proving complete for epoch 2

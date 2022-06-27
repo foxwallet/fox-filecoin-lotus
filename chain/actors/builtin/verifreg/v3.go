@@ -9,6 +9,7 @@ import (
 	"github.com/filecoin-project/lotus/chain/actors/adt"
 
 	builtin3 "github.com/filecoin-project/specs-actors/v3/actors/builtin"
+
 	verifreg3 "github.com/filecoin-project/specs-actors/v3/actors/builtin/verifreg"
 	adt3 "github.com/filecoin-project/specs-actors/v3/actors/util/adt"
 )
@@ -54,6 +55,10 @@ func (s *state3) VerifierDataCap(addr address.Address) (bool, abi.StoragePower, 
 	return getDataCap(s.store, actors.Version3, s.verifiers, addr)
 }
 
+func (s *state3) RemoveDataCapProposalID(verifier address.Address, client address.Address) (bool, uint64, error) {
+	return getRemoveDataCapProposalID(s.store, actors.Version3, s.removeDataCapProposalIDs, verifier, client)
+}
+
 func (s *state3) ForEachVerifier(cb func(addr address.Address, dcap abi.StoragePower) error) error {
 	return forEachCap(s.store, actors.Version3, s.verifiers, cb)
 }
@@ -68,6 +73,11 @@ func (s *state3) verifiedClients() (adt.Map, error) {
 
 func (s *state3) verifiers() (adt.Map, error) {
 	return adt3.AsMap(s.store, s.Verifiers, builtin3.DefaultHamtBitwidth)
+}
+
+func (s *state3) removeDataCapProposalIDs() (adt.Map, error) {
+	return nil, nil
+
 }
 
 func (s *state3) GetState() interface{} {

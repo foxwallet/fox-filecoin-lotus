@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
+
+	"github.com/filecoin-project/lotus/chain/actors/builtin/market"
 
 	levelds "github.com/ipfs/go-ds-leveldb"
 	ldbopts "github.com/syndtr/goleveldb/leveldb/opt"
@@ -81,7 +84,7 @@ var marketDealFeesCmd = &cli.Command{
 
 			for _, deal := range deals {
 				if deal.Proposal.Provider == p {
-					e, p := deal.Proposal.GetDealFees(ht)
+					e, p := market.GetDealFees(deal.Proposal, ht)
 					ef = big.Add(ef, e)
 					pf = big.Add(pf, p)
 					count++
@@ -102,7 +105,7 @@ var marketDealFeesCmd = &cli.Command{
 				return err
 			}
 
-			ef, pf := deal.Proposal.GetDealFees(ht)
+			ef, pf := market.GetDealFees(deal.Proposal, ht)
 
 			fmt.Println("Earned fees: ", ef)
 			fmt.Println("Pending fees: ", pf)
@@ -198,7 +201,7 @@ var marketExportDatastoreCmd = &cli.Command{
 		}
 
 		// Write the backup to the file
-		if err := bds.Backup(out); err != nil {
+		if err := bds.Backup(context.Background(), out); err != nil {
 			if cerr := out.Close(); cerr != nil {
 				log.Errorw("error closing backup file while handling backup error", "closeErr", cerr, "backupErr", err)
 			}
@@ -215,7 +218,7 @@ var marketExportDatastoreCmd = &cli.Command{
 }
 
 func exportPrefix(prefix string, ds datastore.Batching, backupDs datastore.Batching) error {
-	q, err := ds.Query(dsq.Query{
+	q, err := ds.Query(context.Background(), dsq.Query{
 		Prefix: prefix,
 	})
 	if err != nil {
@@ -225,7 +228,7 @@ func exportPrefix(prefix string, ds datastore.Batching, backupDs datastore.Batch
 
 	for res := range q.Next() {
 		fmt.Println("Exporting key " + res.Key)
-		err := backupDs.Put(datastore.NewKey(res.Key), res.Value)
+		err := backupDs.Put(context.Background(), datastore.NewKey(res.Key), res.Value)
 		if err != nil {
 			return xerrors.Errorf("putting %s to backup datastore: %w", res.Key, err)
 		}
