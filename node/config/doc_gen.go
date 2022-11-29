@@ -325,14 +325,14 @@ regardless of this number.`,
 			Type: "string",
 
 			Comment: `A command used for fine-grained evaluation of storage deals
-see https://docs.filecoin.io/mine/lotus/miner-configuration/#using-filters-for-fine-grained-storage-and-retrieval-deal-acceptance for more details`,
+see https://lotus.filecoin.io/storage-providers/advanced-configurations/market/#using-filters-for-fine-grained-storage-and-retrieval-deal-acceptance for more details`,
 		},
 		{
 			Name: "RetrievalFilter",
 			Type: "string",
 
 			Comment: `A command used for fine-grained evaluation of retrieval deals
-see https://docs.filecoin.io/mine/lotus/miner-configuration/#using-filters-for-fine-grained-storage-and-retrieval-deal-acceptance for more details`,
+see https://lotus.filecoin.io/storage-providers/advanced-configurations/market/#using-filters-for-fine-grained-storage-and-retrieval-deal-acceptance for more details`,
 		},
 		{
 			Name: "RetrievalPricing",
@@ -698,11 +698,9 @@ After changing this option, confirm that the new value works in your setup by in
 A single partition may contain up to 2349 32GiB sectors, or 2300 64GiB sectors.
 
 The maximum number of sectors which can be proven in a single PoSt message is 25000 in network version 16, which
-means that a single message can prove at most 10 partinions
+means that a single message can prove at most 10 partitions
 
-In some cases when submitting PoSt messages which are recovering sectors, the default network limit may still be
-too high to fit in the block gas limit; In those cases it may be necessary to set this value to something lower
-than 10; Note that setting this value lower may result in less efficient gas use - more messages will be sent,
+Note that setting this value lower may result in less efficient gas use - more messages will be sent,
 to prove each deadline, resulting in more total gas use (but each message will have lower gas limit)
 
 Setting this value above the network limit has no effect`,
@@ -716,6 +714,19 @@ there may be too many recoveries to fit in a BlockGasLimit.
 In those cases it may be necessary to set this value to something low (eg 1);
 Note that setting this value lower may result in less efficient gas use - more messages will be sent than needed,
 resulting in more total gas use (but each message will have lower gas limit)`,
+		},
+		{
+			Name: "SingleRecoveringPartitionPerPostMessage",
+			Type: "bool",
+
+			Comment: `Enable single partition per PoSt Message for partitions containing recovery sectors
+
+In cases when submitting PoSt messages which contain recovering sectors, the default network limit may still be
+too high to fit in the block gas limit. In those cases, it becomes useful to only house the single partition
+with recovering sectors in the post message
+
+Note that setting this value lower may result in less efficient gas use - more messages will be sent,
+to prove each deadline, resulting in more total gas use (but each message will have lower gas limit)`,
 		},
 	},
 	"Pubsub": []DocField{
@@ -797,10 +808,16 @@ This parameter is ONLY applicable if the retrieval pricing policy strategy has b
 			Comment: ``,
 		},
 		{
+			Name: "AllowSectorDownload",
+			Type: "bool",
+
+			Comment: ``,
+		},
+		{
 			Name: "AllowAddPiece",
 			Type: "bool",
 
-			Comment: `Local worker config`,
+			Comment: ``,
 		},
 		{
 			Name: "AllowPreCommit1",
@@ -921,6 +938,30 @@ flow when the volume of storage deals is lower.`,
 			Type: "uint64",
 
 			Comment: `Upper bound on how many sectors can be sealing+upgrading at the same time when upgrading CC sectors with deals (0 = MaxSealingSectorsForDeals)`,
+		},
+		{
+			Name: "MinUpgradeSectorExpiration",
+			Type: "uint64",
+
+			Comment: `When set to a non-zero value, minimum number of epochs until sector expiration required for sectors to be considered
+for upgrades (0 = DealMinDuration = 180 days = 518400 epochs)
+
+Note that if all deals waiting in the input queue have lifetimes longer than this value, upgrade sectors will be
+required to have expiration of at least the soonest-ending deal`,
+		},
+		{
+			Name: "MinTargetUpgradeSectorExpiration",
+			Type: "uint64",
+
+			Comment: `When set to a non-zero value, minimum number of epochs until sector expiration above which upgrade candidates will
+be selected based on lowest initial pledge.
+
+Target sector expiration is calculated by looking at the input deal queue, sorting it by deal expiration, and
+selecting N deals from the queue up to sector size. The target expiration will be Nth deal end epoch, or in case
+where there weren't enough deals to fill a sector, DealMaxDuration (540 days = 1555200 epochs)
+
+Setting this to a high value (for example to maximum deal duration - 1555200) will disable selection based on
+initial pledge - upgrade sectors will always be chosen based on longest expiration`,
 		},
 		{
 			Name: "CommittedCapacitySectorLifetime",

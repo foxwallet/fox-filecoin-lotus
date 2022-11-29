@@ -30,13 +30,14 @@ import (
 func GetReturnType(ctx context.Context, sm *StateManager, to address.Address, method abi.MethodNum, ts *types.TipSet) (cbg.CBORUnmarshaler, error) {
 	act, err := sm.LoadActor(ctx, to, ts)
 	if err != nil {
-		return nil, xerrors.Errorf("(get sset) failed to load miner actor: %w", err)
+		return nil, xerrors.Errorf("(get sset) failed to load actor: %w", err)
 	}
 
 	m, found := sm.tsExec.NewActorRegistry().Methods[act.Code][method]
 	if !found {
 		return nil, fmt.Errorf("unknown method %d for actor %s", method, act.Code)
 	}
+
 	return reflect.New(m.Ret.Elem()).Interface().(cbg.CBORUnmarshaler), nil
 }
 
