@@ -724,7 +724,7 @@ type GatewayMethods struct {
 
 	GasEstimateMessageGas func(p0 context.Context, p1 *types.Message, p2 *MessageSendSpec, p3 types.TipSetKey) (*types.Message, error) ``
 
-	MpoolPush func(p0 context.Context, p1 *types.SignedMessage) (cid.Cid, error) ``
+	MpoolPush func(p0 context.Context, p1 *types.SignedMessage) (cid.Cid, error) `perm:"write"`
 
 	MsigGetAvailableBalance func(p0 context.Context, p1 address.Address, p2 types.TipSetKey) (types.BigInt, error) ``
 
