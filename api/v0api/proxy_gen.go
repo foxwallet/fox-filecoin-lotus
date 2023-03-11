@@ -185,7 +185,7 @@ type FullNodeMethods struct {
 
 	MpoolPendingFox func(p0 context.Context, p1 types.TipSetKey) ([]*api.SignedMessageFox, error) `perm:"read"`
 
-	MpoolPush func(p0 context.Context, p1 *types.SignedMessage) (cid.Cid, error) `perm:"write"`
+	MpoolPush func(p0 context.Context, p1 *types.SignedMessage) (cid.Cid, error) `perm:"read"`
 
 	MpoolPushMessage func(p0 context.Context, p1 *types.Message, p2 *api.MessageSendSpec) (*types.SignedMessage, error) `perm:"sign"`
 
@@ -457,7 +457,7 @@ type GatewayMethods struct {
 
 	MpoolGetNonce func(p0 context.Context, p1 address.Address) (uint64, error) ``
 
-	MpoolPush func(p0 context.Context, p1 *types.SignedMessage) (cid.Cid, error) `perm:"write"`
+	MpoolPush func(p0 context.Context, p1 *types.SignedMessage) (cid.Cid, error) `perm:"read"`
 
 	MsigGetAvailableBalance func(p0 context.Context, p1 address.Address, p2 types.TipSetKey) (types.BigInt, error) ``
 
