@@ -13,11 +13,13 @@ import (
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
+	"github.com/filecoin-project/go-state-types/builtin"
 	miner11 "github.com/filecoin-project/go-state-types/builtin/v11/miner"
 	"github.com/filecoin-project/go-state-types/network"
 
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/build"
+	"github.com/filecoin-project/lotus/chain/actors"
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/itests/kit"
 	"github.com/filecoin-project/lotus/node/impl"
@@ -54,9 +56,6 @@ func TestWindowedPost(t *testing.T) {
 }
 
 func testWindowPostUpgrade(t *testing.T, blocktime time.Duration, nSectors int, upgradeHeight abi.ChainEpoch) {
-
-	/// XXX  TEMPORARILY DISABLED UNTIL NV18 MIGRATION IS IMPLEMENTED
-	t.Skip("temporarily disabled as nv18 migration is not yet implemented")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -390,6 +389,9 @@ waitForProof:
 	inclTs, err := client.ChainGetTipSet(ctx, pmr.TipSet)
 	require.NoError(t, err)
 
+	inclTsParents, err := client.ChainGetTipSet(ctx, inclTs.Parents())
+	require.NoError(t, err)
+
 	nv, err := client.StateNetworkVersion(ctx, pmr.TipSet)
 	require.NoError(t, err)
 	require.Equal(t, network.Version19, nv)
@@ -410,8 +412,8 @@ waitForProof:
 
 	slmsg.Params = v1PostParams.Bytes()
 
-	// Simulate call on inclTs's parents, so that the partition isn't already proven
-	call, err := client.StateCall(ctx, slmsg, inclTs.Parents())
+	// Simulate call on inclTsParents's parents, so that the partition isn't already proven
+	call, err := client.StateCall(ctx, slmsg, inclTsParents.Parents())
 	require.NoError(t, err)
 	require.True(t, call.MsgRct.ExitCode.IsSuccess())
 }
@@ -484,4 +486,40 @@ waitForProof:
 	// Simulate call on inclTs's parents, so that the partition isn't already proven
 	_, err = client.StateCall(ctx, slmsg, inclTs.Parents())
 	require.ErrorContains(t, err, "expected proof of type StackedDRGWindow2KiBV1P1, got StackedDRGWindow2KiBV1")
+
+	for {
+		//stm: @CHAIN_STATE_MINER_CALCULATE_DEADLINE_001
+		di, err := client.StateMinerProvingDeadline(ctx, maddr, types.EmptyTSK)
+		require.NoError(t, err)
+		// wait until the deadline finishes.
+		if di.Index == ((params.Deadline + 1) % di.WPoStPeriodDeadlines) {
+			break
+		}
+
+		build.Clock.Sleep(blocktime)
+	}
+
+	// Try to object to the proof. This should fail.
+
+	disputeParams := &miner11.DisputeWindowedPoStParams{
+		Deadline:  params.Deadline,
+		PoStIndex: 0,
+	}
+
+	enc, aerr := actors.SerializeParams(disputeParams)
+	require.NoError(t, aerr)
+
+	disputeMsg := &types.Message{
+		To:     maddr,
+		Method: builtin.MethodsMiner.DisputeWindowedPoSt,
+		Params: enc,
+		Value:  types.NewInt(0),
+		From:   client.DefaultKey.Address,
+	}
+
+	_, err = client.MpoolPushMessage(ctx, disputeMsg, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to dispute valid post")
+	require.Contains(t, err.Error(), "(RetCode=16)")
+
 }
