@@ -14,9 +14,9 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-graphsync"
-	blocks "github.com/ipfs/go-libipfs/blocks"
 	textselector "github.com/ipld/go-ipld-selector-text-lite"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/metrics"
@@ -86,6 +86,7 @@ func init() {
 	}
 
 	ExampleValues[reflect.TypeOf(addr)] = addr
+	ExampleValues[reflect.TypeOf(&addr)] = &addr
 
 	pid, err := peer.Decode("12D3KooWGzxzKZYveHXtpG6AsrUJBcWxHBFS2HsEoGTxrMLvKXtf")
 	if err != nil {
@@ -479,6 +480,9 @@ func ExampleValue(method string, t, parent reflect.Type) interface{} {
 			es := exampleStruct(method, t.Elem(), t)
 			ExampleValues[t] = es
 			return es
+		} else if t.Elem().Kind() == reflect.String {
+			str := "string value"
+			return &str
 		}
 	case reflect.Interface:
 		return struct{}{}

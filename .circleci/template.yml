@@ -7,12 +7,12 @@ executors:
   golang:
     docker:
       # Must match GO_VERSION_MIN in project root
-      - image: cimg/go:1.19.7
+      - image: cimg/go:1.20.7
     resource_class: medium+
   golang-2xl:
     docker:
       # Must match GO_VERSION_MIN in project root
-      - image: cimg/go:1.19.7
+      - image: cimg/go:1.20.7
     resource_class: 2xlarge
   ubuntu:
     docker:
@@ -63,7 +63,7 @@ commands:
                 name: Install Rust
                 command: |
                   curl https://sh.rustup.rs -sSf | sh -s -- -y
-      - run: make deps lotus
+      - run: make deps
   download-params:
     steps:
       - restore_cache:
@@ -304,9 +304,7 @@ jobs:
           darwin: true
           darwin-architecture: arm64
       - run: |
-          export CPATH=$(brew --prefix)/include
-          export LIBRARY_PATH=$(brew --prefix)/lib
-          make lotus lotus-miner lotus-worker
+          export CPATH=$(brew --prefix)/include && export LIBRARY_PATH=$(brew --prefix)/lib && make lotus lotus-miner lotus-worker
       - run: otool -hv lotus
       - run:
           name: check tag and version output match
@@ -547,7 +545,7 @@ workflows:
           [[- if or (eq $name "worker") (eq $name "deals_concurrent") (eq $name "wdpost_worker_config")]]
           executor: golang-2xl
           [[- end]]
-          [[- if (eq $name "wdpost")]]
+          [[- if or (eq $name "wdpost") (eq $name "sector_pledge")]]
           get-params: true
           [[end]]
       [[- end ]][[- end]]
@@ -560,6 +558,7 @@ workflows:
           suite: utest-[[ $suite ]]
           target: "[[ $pkgs ]]"
           [[if eq $suite "unit-cli"]]get-params: true[[end]]
+          [[if eq $suite "unit-cli"]]executor: golang-2xl[[end]]
           [[- if eq $suite "unit-rest"]]executor: golang-2xl[[end]]
       [[- end]]
       - test:
@@ -583,6 +582,7 @@ workflows:
             branches:
               only:
                 - /^release\/v\d+\.\d+\.\d+(-rc\d+)?$/
+                - /^ci\/.*$/
             tags:
               only:
                 - /^v\d+\.\d+\.\d+(-rc\d+)?$/
@@ -592,6 +592,7 @@ workflows:
             branches:
               only:
                 - /^release\/v\d+\.\d+\.\d+(-rc\d+)?$/
+                - /^ci\/.*$/
             tags:
               only:
                 - /^v\d+\.\d+\.\d+(-rc\d+)?$/
@@ -601,6 +602,7 @@ workflows:
             branches:
               only:
                 - /^release\/v\d+\.\d+\.\d+(-rc\d+)?$/
+                - /^ci\/.*$/
             tags:
               only:
                 - /^v\d+\.\d+\.\d+(-rc\d+)?$/
@@ -613,7 +615,7 @@ workflows:
           filters:
             branches:
               ignore:
-                - /.*/
+                - /^.*$/
             tags:
               only:
                 - /^v\d+\.\d+\.\d+(-rc\d+)?$/
@@ -628,6 +630,7 @@ workflows:
             branches:
               only:
                 - /^release\/v\d+\.\d+\.\d+(-rc\d+)?$/
+                - /^ci\/.*$/
       [[- range .Networks]]
       - build-docker:
           name: "Docker push (lotus-all-in-one / stable / [[.]])"

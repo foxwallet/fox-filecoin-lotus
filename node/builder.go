@@ -24,6 +24,7 @@ import (
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/build"
 	"github.com/filecoin-project/lotus/chain/beacon"
+	"github.com/filecoin-project/lotus/chain/index"
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/journal"
 	"github.com/filecoin-project/lotus/journal/alerting"
@@ -88,6 +89,8 @@ const (
 
 	// health checks
 	CheckFDLimit
+	CheckFvmConcurrency
+	LegacyMarketsEOL
 
 	// libp2p
 	PstoreAddSelfKeysKey
@@ -124,6 +127,8 @@ const (
 	RunPeerTaggerKey
 	SetupFallbackBlockstoresKey
 	GoRPCServer
+
+	ConsensusReporterKey
 
 	SetApiEndpointKey
 
@@ -163,6 +168,7 @@ func defaults() []Option {
 		Override(new(dtypes.NodeStartTime), FromVal(dtypes.NodeStartTime(time.Now()))),
 
 		Override(CheckFDLimit, modules.CheckFdLimit(build.DefaultFDLimit)),
+		Override(CheckFvmConcurrency, modules.CheckFvmConcurrency()),
 
 		Override(new(system.MemoryConstraints), modules.MemoryConstraints),
 		Override(InitMemoryWatchdog, modules.MemoryWatchdog),
@@ -390,6 +396,7 @@ func Test() Option {
 		Unset(new(*peermgr.PeerMgr)),
 		Override(new(beacon.Schedule), testing.RandomBeacon),
 		Override(new(*storageadapter.DealPublisher), storageadapter.NewDealPublisher(nil, storageadapter.PublishMsgConfig{})),
+		Override(new(index.MsgIndex), modules.DummyMsgIndex),
 	)
 }
 

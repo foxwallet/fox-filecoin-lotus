@@ -10,8 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
+	"path"
+	"path/filepath"
 	"runtime/pprof"
 	"strings"
 
@@ -32,8 +33,10 @@ import (
 
 	lapi "github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/build"
+	"github.com/filecoin-project/lotus/chain/beacon/drand"
 	"github.com/filecoin-project/lotus/chain/consensus"
 	"github.com/filecoin-project/lotus/chain/consensus/filcns"
+	"github.com/filecoin-project/lotus/chain/index"
 	"github.com/filecoin-project/lotus/chain/stmgr"
 	"github.com/filecoin-project/lotus/chain/store"
 	"github.com/filecoin-project/lotus/chain/types"
@@ -41,10 +44,12 @@ import (
 	lcli "github.com/filecoin-project/lotus/cli"
 	"github.com/filecoin-project/lotus/journal"
 	"github.com/filecoin-project/lotus/journal/fsjournal"
+	"github.com/filecoin-project/lotus/lib/httpreader"
 	"github.com/filecoin-project/lotus/lib/peermgr"
 	"github.com/filecoin-project/lotus/lib/ulimit"
 	"github.com/filecoin-project/lotus/metrics"
 	"github.com/filecoin-project/lotus/node"
+	"github.com/filecoin-project/lotus/node/config"
 	"github.com/filecoin-project/lotus/node/modules"
 	"github.com/filecoin-project/lotus/node/modules/dtypes"
 	"github.com/filecoin-project/lotus/node/modules/testing"
@@ -115,6 +120,10 @@ var DaemonCmd = &cli.Command{
 		&cli.StringFlag{
 			Name:  "import-snapshot",
 			Usage: "import chain state from a given chain export file or url",
+		},
+		&cli.BoolFlag{
+			Name:  "remove-existing-chain",
+			Usage: "remove existing chain and splitstore data on a snapshot-import",
 		},
 		&cli.BoolFlag{
 			Name:  "halt-after-import",
@@ -260,6 +269,26 @@ var DaemonCmd = &cli.Command{
 			}
 		}
 
+		if cctx.Bool("remove-existing-chain") {
+			lr, err := repo.NewFS(cctx.String("repo"))
+			if err != nil {
+				return xerrors.Errorf("error opening fs repo: %w", err)
+			}
+
+			exists, err := lr.Exists()
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return xerrors.Errorf("lotus repo doesn't exist")
+			}
+
+			err = removeExistingChain(cctx, lr)
+			if err != nil {
+				return err
+			}
+		}
+
 		chainfile := cctx.String("import-chain")
 		snapshot := cctx.String("import-snapshot")
 		if chainfile != "" || snapshot != "" {
@@ -377,7 +406,6 @@ var DaemonCmd = &cli.Command{
 		if err != nil {
 			return fmt.Errorf("failed to start json-rpc endpoint: %s", err)
 		}
-
 		// Monitor for shutdown.
 		finishCh := node.MonitorShutdown(shutdownChan,
 			node.ShutdownHandler{Component: "rpc server", StopFunc: rpcStopper},
@@ -431,18 +459,13 @@ func ImportChain(ctx context.Context, r repo.Repo, fname string, snapshot bool) 
 	var rd io.Reader
 	var l int64
 	if strings.HasPrefix(fname, "http://") || strings.HasPrefix(fname, "https://") {
-		resp, err := http.Get(fname) //nolint:gosec
+		rrd, err := httpreader.NewResumableReader(ctx, fname)
 		if err != nil {
-			return err
-		}
-		defer resp.Body.Close() //nolint:errcheck
-
-		if resp.StatusCode != http.StatusOK {
-			return xerrors.Errorf("fetching chain CAR failed with non-200 response: %d", resp.StatusCode)
+			return xerrors.Errorf("fetching chain CAR failed: setting up resumable reader: %w", err)
 		}
 
-		rd = resp.Body
-		l = resp.ContentLength
+		rd = rrd
+		l = rrd.ContentLength()
 	} else {
 		fname, err = homedir.Expand(fname)
 		if err != nil {
@@ -538,13 +561,17 @@ func ImportChain(ctx context.Context, r repo.Repo, fname string, snapshot bool) 
 		return err
 	}
 
-	// TODO: We need to supply the actual beacon after v14
-	stm, err := stmgr.NewStateManager(cst, consensus.NewTipSetExecutor(filcns.RewardFunc), vm.Syscalls(ffiwrapper.ProofVerifier), filcns.DefaultUpgradeSchedule(), nil, mds)
-	if err != nil {
-		return err
-	}
-
 	if !snapshot {
+		shd, err := drand.BeaconScheduleFromDrandSchedule(build.DrandConfigSchedule(), gb.MinTimestamp(), nil)
+		if err != nil {
+			return xerrors.Errorf("failed to construct beacon schedule: %w", err)
+		}
+
+		stm, err := stmgr.NewStateManager(cst, consensus.NewTipSetExecutor(filcns.RewardFunc), vm.Syscalls(ffiwrapper.ProofVerifier), filcns.DefaultUpgradeSchedule(), shd, mds, index.DummyMsgIndex)
+		if err != nil {
+			return err
+		}
+
 		log.Infof("validating imported chain...")
 		if err := stm.ValidateChain(ctx, ts); err != nil {
 			return xerrors.Errorf("chain validation failed: %w", err)
@@ -556,5 +583,79 @@ func ImportChain(ctx context.Context, r repo.Repo, fname string, snapshot bool) 
 		return err
 	}
 
+	// populate the message index if user has EnableMsgIndex enabled
+	//
+	c, err := lr.Config()
+	if err != nil {
+		return err
+	}
+	cfg, ok := c.(*config.FullNode)
+	if !ok {
+		return xerrors.Errorf("invalid config for repo, got: %T", c)
+	}
+	if cfg.Index.EnableMsgIndex {
+		log.Info("populating message index...")
+		if err := index.PopulateAfterSnapshot(ctx, path.Join(lr.Path(), "sqlite"), cst); err != nil {
+			return err
+		}
+		log.Info("populating message index done")
+	}
+
 	return nil
+}
+
+func removeExistingChain(cctx *cli.Context, lr repo.Repo) error {
+	lockedRepo, err := lr.Lock(repo.FullNode)
+	if err != nil {
+		return xerrors.Errorf("error locking repo: %w", err)
+	}
+	// Ensure that lockedRepo is closed when this function exits
+	defer func() {
+		if closeErr := lockedRepo.Close(); closeErr != nil {
+			log.Errorf("Error closing the lockedRepo: %v", closeErr)
+		}
+	}()
+
+	cfg, err := lockedRepo.Config()
+	if err != nil {
+		return xerrors.Errorf("error getting config: %w", err)
+	}
+
+	fullNodeConfig, ok := cfg.(*config.FullNode)
+	if !ok {
+		return xerrors.Errorf("wrong config type: %T", cfg)
+	}
+
+	if fullNodeConfig.Chainstore.EnableSplitstore {
+		log.Info("removing splitstore directory...")
+		err = deleteSplitstoreDir(lockedRepo)
+		if err != nil {
+			return xerrors.Errorf("error removing splitstore directory: %w", err)
+		}
+	}
+
+	// Get the base repo path
+	repoPath := lockedRepo.Path()
+
+	// Construct the path to the chain directory
+	chainPath := filepath.Join(repoPath, "datastore", "chain")
+
+	log.Info("removing chain directory:", chainPath)
+
+	err = os.RemoveAll(chainPath)
+	if err != nil {
+		return xerrors.Errorf("error removing chain directory: %w", err)
+	}
+
+	log.Info("chain and splitstore data have been removed")
+	return nil
+}
+
+func deleteSplitstoreDir(lr repo.LockedRepo) error {
+	path, err := lr.SplitstorePath()
+	if err != nil {
+		return xerrors.Errorf("error getting splitstore path: %w", err)
+	}
+
+	return os.RemoveAll(path)
 }

@@ -3,8 +3,11 @@ package stmgr
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 
+	"github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ipfs/go-cid"
 	dstore "github.com/ipfs/go-datastore"
 	cbor "github.com/ipfs/go-ipld-cbor"
@@ -25,6 +28,7 @@ import (
 	"github.com/filecoin-project/lotus/chain/actors/builtin/paych"
 	"github.com/filecoin-project/lotus/chain/actors/policy"
 	"github.com/filecoin-project/lotus/chain/beacon"
+	"github.com/filecoin-project/lotus/chain/index"
 	"github.com/filecoin-project/lotus/chain/rand"
 	"github.com/filecoin-project/lotus/chain/state"
 	"github.com/filecoin-project/lotus/chain/store"
@@ -38,6 +42,7 @@ import (
 const LookbackNoLimit = api.LookbackNoLimit
 const ReceiptAmtBitwidth = 3
 
+var execTraceCacheSize = 16
 var log = logging.Logger("statemgr")
 
 type StateManagerAPI interface {
@@ -68,6 +73,17 @@ type migrationResultCache struct {
 func (m *migrationResultCache) keyForMigration(root cid.Cid) dstore.Key {
 	kStr := fmt.Sprintf("%s/%s", m.keyPrefix, root)
 	return dstore.NewKey(kStr)
+}
+
+func init() {
+	if s := os.Getenv("LOTUS_EXEC_TRACE_CACHE_SIZE"); s != "" {
+		letc, err := strconv.Atoi(s)
+		if err != nil {
+			log.Errorf("failed to parse 'LOTUS_EXEC_TRACE_CACHE_SIZE' env var: %s", err)
+		} else {
+			execTraceCacheSize = letc
+		}
+	}
 }
 
 func (m *migrationResultCache) Get(ctx context.Context, root cid.Cid) (cid.Cid, bool, error) {
@@ -135,6 +151,15 @@ type StateManager struct {
 	tsExec        Executor
 	tsExecMonitor ExecMonitor
 	beacon        beacon.Schedule
+
+	msgIndex index.MsgIndex
+
+	// We keep a small cache for calls to ExecutionTrace which helps improve
+	// performance for node operators like exchanges and block explorers
+	execTraceCache *arc.ARCCache[types.TipSetKey, tipSetCacheEntry]
+	// We need a lock while making the copy as to prevent other callers
+	// overwrite the cache while making the copy
+	execTraceCacheLock sync.Mutex
 }
 
 // Caches a single state tree
@@ -143,7 +168,12 @@ type treeCache struct {
 	tree *state.StateTree
 }
 
-func NewStateManager(cs *store.ChainStore, exec Executor, sys vm.SyscallBuilder, us UpgradeSchedule, beacon beacon.Schedule, metadataDs dstore.Batching) (*StateManager, error) {
+type tipSetCacheEntry struct {
+	postStateRoot cid.Cid
+	invocTrace    []*api.InvocResult
+}
+
+func NewStateManager(cs *store.ChainStore, exec Executor, sys vm.SyscallBuilder, us UpgradeSchedule, beacon beacon.Schedule, metadataDs dstore.Batching, msgIndex index.MsgIndex) (*StateManager, error) {
 	// If we have upgrades, make sure they're in-order and make sense.
 	if err := us.Validate(); err != nil {
 		return nil, err
@@ -182,6 +212,16 @@ func NewStateManager(cs *store.ChainStore, exec Executor, sys vm.SyscallBuilder,
 		}
 	}
 
+	log.Debugf("execTraceCache size: %d", execTraceCacheSize)
+	var execTraceCache *arc.ARCCache[types.TipSetKey, tipSetCacheEntry]
+	var err error
+	if execTraceCacheSize > 0 {
+		execTraceCache, err = arc.NewARC[types.TipSetKey, tipSetCacheEntry](execTraceCacheSize)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &StateManager{
 		networkVersions:   networkVersions,
 		latestVersion:     lastVersion,
@@ -197,12 +237,14 @@ func NewStateManager(cs *store.ChainStore, exec Executor, sys vm.SyscallBuilder,
 			root: cid.Undef,
 			tree: nil,
 		},
-		compWait: make(map[string]chan struct{}),
+		compWait:       make(map[string]chan struct{}),
+		msgIndex:       msgIndex,
+		execTraceCache: execTraceCache,
 	}, nil
 }
 
-func NewStateManagerWithUpgradeScheduleAndMonitor(cs *store.ChainStore, exec Executor, sys vm.SyscallBuilder, us UpgradeSchedule, b beacon.Schedule, em ExecMonitor, metadataDs dstore.Batching) (*StateManager, error) {
-	sm, err := NewStateManager(cs, exec, sys, us, b, metadataDs)
+func NewStateManagerWithUpgradeScheduleAndMonitor(cs *store.ChainStore, exec Executor, sys vm.SyscallBuilder, us UpgradeSchedule, b beacon.Schedule, em ExecMonitor, metadataDs dstore.Batching, msgIndex index.MsgIndex) (*StateManager, error) {
+	sm, err := NewStateManager(cs, exec, sys, us, b, metadataDs, msgIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -467,7 +509,17 @@ func (sm *StateManager) GetRandomnessFromBeacon(ctx context.Context, personaliza
 
 	r := rand.NewStateRand(sm.ChainStore(), pts.Cids(), sm.beacon, sm.GetNetworkVersion)
 
-	return r.GetBeaconRandomness(ctx, personalization, randEpoch, entropy)
+	digest, err := r.GetBeaconRandomness(ctx, randEpoch)
+	if err != nil {
+		return nil, xerrors.Errorf("getting beacon randomness: %w", err)
+	}
+
+	ret, err := rand.DrawRandomnessFromDigest(digest, personalization, randEpoch, entropy)
+	if err != nil {
+		return nil, xerrors.Errorf("drawing beacon randomness: %w", err)
+	}
+
+	return ret, nil
 
 }
 
@@ -479,5 +531,38 @@ func (sm *StateManager) GetRandomnessFromTickets(ctx context.Context, personaliz
 
 	r := rand.NewStateRand(sm.ChainStore(), pts.Cids(), sm.beacon, sm.GetNetworkVersion)
 
-	return r.GetChainRandomness(ctx, personalization, randEpoch, entropy)
+	digest, err := r.GetChainRandomness(ctx, randEpoch)
+	if err != nil {
+		return nil, xerrors.Errorf("getting chain randomness: %w", err)
+	}
+
+	ret, err := rand.DrawRandomnessFromDigest(digest, personalization, randEpoch, entropy)
+	if err != nil {
+		return nil, xerrors.Errorf("drawing chain randomness: %w", err)
+	}
+
+	return ret, nil
+}
+
+func (sm *StateManager) GetRandomnessDigestFromBeacon(ctx context.Context, randEpoch abi.ChainEpoch, tsk types.TipSetKey) ([32]byte, error) {
+	pts, err := sm.ChainStore().GetTipSetFromKey(ctx, tsk)
+	if err != nil {
+		return [32]byte{}, xerrors.Errorf("loading tipset %s: %w", tsk, err)
+	}
+
+	r := rand.NewStateRand(sm.ChainStore(), pts.Cids(), sm.beacon, sm.GetNetworkVersion)
+
+	return r.GetBeaconRandomness(ctx, randEpoch)
+
+}
+
+func (sm *StateManager) GetRandomnessDigestFromTickets(ctx context.Context, randEpoch abi.ChainEpoch, tsk types.TipSetKey) ([32]byte, error) {
+	pts, err := sm.ChainStore().LoadTipSet(ctx, tsk)
+	if err != nil {
+		return [32]byte{}, xerrors.Errorf("loading tipset key: %w", err)
+	}
+
+	r := rand.NewStateRand(sm.ChainStore(), pts.Cids(), sm.beacon, sm.GetNetworkVersion)
+
+	return r.GetChainRandomness(ctx, randEpoch)
 }

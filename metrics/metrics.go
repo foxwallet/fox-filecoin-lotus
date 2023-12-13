@@ -58,6 +58,13 @@ var (
 	ProtocolID, _ = tag.NewKey("proto")
 	Direction, _  = tag.NewKey("direction")
 	UseFD, _      = tag.NewKey("use_fd")
+
+	// vm execution
+	ExecutionLane, _ = tag.NewKey("lane")
+
+	// piecereader
+	PRReadType, _ = tag.NewKey("pr_type") // seq / rand
+	PRReadSize, _ = tag.NewKey("pr_size") // small / big
 )
 
 // Measures
@@ -109,6 +116,7 @@ var (
 	PubsubDeliverMessage                = stats.Int64("pubsub/delivered", "Counter for total delivered messages", stats.UnitDimensionless)
 	PubsubRejectMessage                 = stats.Int64("pubsub/rejected", "Counter for total rejected messages", stats.UnitDimensionless)
 	PubsubDuplicateMessage              = stats.Int64("pubsub/duplicate", "Counter for total duplicate messages", stats.UnitDimensionless)
+	PubsubPruneMessage                  = stats.Int64("pubsub/prune", "Counter for total prune messages", stats.UnitDimensionless)
 	PubsubRecvRPC                       = stats.Int64("pubsub/recv_rpc", "Counter for total received RPCs", stats.UnitDimensionless)
 	PubsubSendRPC                       = stats.Int64("pubsub/send_rpc", "Counter for total sent RPCs", stats.UnitDimensionless)
 	PubsubDropRPC                       = stats.Int64("pubsub/drop_rpc", "Counter for total dropped RPCs", stats.UnitDimensionless)
@@ -121,6 +129,8 @@ var (
 	VMApplyFlush                        = stats.Float64("vm/applyblocks_flush", "Time spent flushing vm state", stats.UnitMilliseconds)
 	VMSends                             = stats.Int64("vm/sends", "Counter for sends processed by the VM", stats.UnitDimensionless)
 	VMApplied                           = stats.Int64("vm/applied", "Counter for messages (including internal messages) processed by the VM", stats.UnitDimensionless)
+	VMExecutionWaiting                  = stats.Int64("vm/execution_waiting", "Counter for VM executions waiting to be assigned to a lane", stats.UnitDimensionless)
+	VMExecutionRunning                  = stats.Int64("vm/execution_running", "Counter for running VM executions", stats.UnitDimensionless)
 
 	// miner
 	WorkerCallsStarted           = stats.Int64("sealing/worker_calls_started", "Counter of started worker tasks", stats.UnitDimensionless)
@@ -148,14 +158,21 @@ var (
 	SchedCycleOpenWindows                = stats.Int64("sched/assigner_cycle_open_window", "Number of open windows in scheduling cycles", stats.UnitDimensionless)
 	SchedCycleQueueSize                  = stats.Int64("sched/assigner_cycle_task_queue_entry", "Number of task queue entries in scheduling cycles", stats.UnitDimensionless)
 
-	DagStorePRInitCount        = stats.Int64("dagstore/pr_init_count", "PieceReader init count", stats.UnitDimensionless)
-	DagStorePRBytesRequested   = stats.Int64("dagstore/pr_requested_bytes", "PieceReader requested bytes", stats.UnitBytes)
+	DagStorePRInitCount      = stats.Int64("dagstore/pr_init_count", "PieceReader init count", stats.UnitDimensionless)
+	DagStorePRBytesRequested = stats.Int64("dagstore/pr_requested_bytes", "PieceReader requested bytes", stats.UnitBytes)
+
 	DagStorePRBytesDiscarded   = stats.Int64("dagstore/pr_discarded_bytes", "PieceReader discarded bytes", stats.UnitBytes)
 	DagStorePRDiscardCount     = stats.Int64("dagstore/pr_discard_count", "PieceReader discard count", stats.UnitDimensionless)
 	DagStorePRSeekBackCount    = stats.Int64("dagstore/pr_seek_back_count", "PieceReader seek back count", stats.UnitDimensionless)
 	DagStorePRSeekForwardCount = stats.Int64("dagstore/pr_seek_forward_count", "PieceReader seek forward count", stats.UnitDimensionless)
 	DagStorePRSeekBackBytes    = stats.Int64("dagstore/pr_seek_back_bytes", "PieceReader seek back bytes", stats.UnitBytes)
 	DagStorePRSeekForwardBytes = stats.Int64("dagstore/pr_seek_forward_bytes", "PieceReader seek forward bytes", stats.UnitBytes)
+
+	DagStorePRAtHitBytes       = stats.Int64("dagstore/pr_at_hit_bytes", "PieceReader ReadAt bytes from cache", stats.UnitBytes)
+	DagStorePRAtHitCount       = stats.Int64("dagstore/pr_at_hit_count", "PieceReader ReadAt from cache hits", stats.UnitDimensionless)
+	DagStorePRAtCacheFillCount = stats.Int64("dagstore/pr_at_cache_fill_count", "PieceReader ReadAt full cache fill count", stats.UnitDimensionless)
+	DagStorePRAtReadBytes      = stats.Int64("dagstore/pr_at_read_bytes", "PieceReader ReadAt bytes read from source", stats.UnitBytes)    // PRReadSize tag
+	DagStorePRAtReadCount      = stats.Int64("dagstore/pr_at_read_count", "PieceReader ReadAt reads from source", stats.UnitDimensionless) // PRReadSize tag
 
 	// splitstore
 	SplitstoreMiss                  = stats.Int64("splitstore/miss", "Number of misses in hotstre access", stats.UnitDimensionless)
@@ -310,6 +327,10 @@ var (
 		Measure:     PubsubDuplicateMessage,
 		Aggregation: view.Count(),
 	}
+	PubsubPruneMessageView = &view.View{
+		Measure:     PubsubPruneMessage,
+		Aggregation: view.Count(),
+	}
 	PubsubRecvRPCView = &view.View{
 		Measure:     PubsubRecvRPC,
 		Aggregation: view.Count(),
@@ -362,6 +383,16 @@ var (
 	VMAppliedView = &view.View{
 		Measure:     VMApplied,
 		Aggregation: view.LastValue(),
+	}
+	VMExecutionWaitingView = &view.View{
+		Measure:     VMExecutionWaiting,
+		Aggregation: view.Sum(),
+		TagKeys:     []tag.Key{ExecutionLane},
+	}
+	VMExecutionRunningView = &view.View{
+		Measure:     VMExecutionRunning,
+		Aggregation: view.Sum(),
+		TagKeys:     []tag.Key{ExecutionLane},
 	}
 
 	// miner
@@ -472,6 +503,7 @@ var (
 	DagStorePRBytesRequestedView = &view.View{
 		Measure:     DagStorePRBytesRequested,
 		Aggregation: view.Sum(),
+		TagKeys:     []tag.Key{PRReadType},
 	}
 	DagStorePRBytesDiscardedView = &view.View{
 		Measure:     DagStorePRBytesDiscarded,
@@ -496,6 +528,29 @@ var (
 	DagStorePRSeekForwardBytesView = &view.View{
 		Measure:     DagStorePRSeekForwardBytes,
 		Aggregation: view.Sum(),
+	}
+
+	DagStorePRAtHitBytesView = &view.View{
+		Measure:     DagStorePRAtHitBytes,
+		Aggregation: view.Sum(),
+	}
+	DagStorePRAtHitCountView = &view.View{
+		Measure:     DagStorePRAtHitCount,
+		Aggregation: view.Count(),
+	}
+	DagStorePRAtCacheFillCountView = &view.View{
+		Measure:     DagStorePRAtCacheFillCount,
+		Aggregation: view.Count(),
+	}
+	DagStorePRAtReadBytesView = &view.View{
+		Measure:     DagStorePRAtReadBytes,
+		Aggregation: view.Sum(),
+		TagKeys:     []tag.Key{PRReadSize},
+	}
+	DagStorePRAtReadCountView = &view.View{
+		Measure:     DagStorePRAtReadCount,
+		Aggregation: view.Count(),
+		TagKeys:     []tag.Key{PRReadSize},
 	}
 
 	// splitstore
@@ -710,6 +765,7 @@ var ChainNodeViews = append([]*view.View{
 	PubsubDeliverMessageView,
 	PubsubRejectMessageView,
 	PubsubDuplicateMessageView,
+	PubsubPruneMessageView,
 	PubsubRecvRPCView,
 	PubsubSendRPCView,
 	PubsubDropRPCView,
@@ -727,6 +783,8 @@ var ChainNodeViews = append([]*view.View{
 	VMApplyFlushView,
 	VMSendsView,
 	VMAppliedView,
+	VMExecutionWaitingView,
+	VMExecutionRunningView,
 }, DefaultViews...)
 
 var MinerNodeViews = append([]*view.View{
@@ -762,6 +820,11 @@ var MinerNodeViews = append([]*view.View{
 	DagStorePRSeekForwardCountView,
 	DagStorePRSeekBackBytesView,
 	DagStorePRSeekForwardBytesView,
+	DagStorePRAtHitBytesView,
+	DagStorePRAtHitCountView,
+	DagStorePRAtCacheFillCountView,
+	DagStorePRAtReadBytesView,
+	DagStorePRAtReadCountView,
 }, DefaultViews...)
 
 var GatewayNodeViews = append([]*view.View{

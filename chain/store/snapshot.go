@@ -3,17 +3,19 @@ package store
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 	"time"
 
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
-	blocks "github.com/ipfs/go-libipfs/blocks"
+	format "github.com/ipfs/go-ipld-format"
 	"github.com/ipld/go-car"
 	carutil "github.com/ipld/go-car/util"
 	carv2 "github.com/ipld/go-car/v2"
-	mh "github.com/multiformats/go-multihash"
+	"github.com/multiformats/go-multicodec"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
@@ -121,17 +123,19 @@ func (cs *ChainStore) Import(ctx context.Context, r io.Reader) (*types.TipSet, e
 	}
 
 	ts := root
+	tssToPersist := make([]*types.TipSet, 0, TipsetkeyBackfillRange)
 	for i := 0; i < int(TipsetkeyBackfillRange); i++ {
-		err = cs.PersistTipset(ctx, ts)
-		if err != nil {
-			return nil, err
-		}
+		tssToPersist = append(tssToPersist, ts)
 		parentTsKey := ts.Parents()
 		ts, err = cs.LoadTipSet(ctx, parentTsKey)
 		if ts == nil || err != nil {
 			log.Warnf("Only able to load the last %d tipsets", i)
 			break
 		}
+	}
+
+	if err := cs.PersistTipsets(ctx, tssToPersist); err != nil {
+		return nil, xerrors.Errorf("failed to persist tipsets: %w", err)
 	}
 
 	return root, nil
@@ -167,8 +171,11 @@ func (t walkSchedTaskType) String() string {
 }
 
 type walkTask struct {
-	c        cid.Cid
-	taskType walkSchedTaskType
+	c                cid.Cid
+	taskType         walkSchedTaskType
+	topLevelTaskType walkSchedTaskType
+	blockCid         cid.Cid
+	epoch            abi.ChainEpoch
 }
 
 // an ever growing FIFO
@@ -317,8 +324,11 @@ func newWalkScheduler(ctx context.Context, store bstore.Blockstore, cfg walkSche
 			cancel() // kill workers
 			return nil, ctx.Err()
 		case s.workerTasks.in <- walkTask{
-			c:        b.Cid(),
-			taskType: blockTask,
+			c:                b.Cid(),
+			taskType:         blockTask,
+			topLevelTaskType: blockTask,
+			blockCid:         b.Cid(),
+			epoch:            cfg.head.Height(),
 		}:
 		}
 	}
@@ -359,11 +369,16 @@ func (s *walkScheduler) Wait() error {
 }
 
 func (s *walkScheduler) enqueueIfNew(task walkTask) {
-	if task.c.Prefix().MhType == mh.IDENTITY {
+	if multicodec.Code(task.c.Prefix().MhType) == multicodec.Identity {
 		//log.Infow("ignored", "cid", todo.c.String())
 		return
 	}
-	if task.c.Prefix().Codec != cid.Raw && task.c.Prefix().Codec != cid.DagCBOR {
+
+	// This lets through RAW, CBOR, and DagCBOR blocks, the only types that we end up writing to
+	// the exported CAR.
+	switch multicodec.Code(task.c.Prefix().Codec) {
+	case multicodec.Cbor, multicodec.DagCbor, multicodec.Raw:
+	default:
 		//log.Infow("ignored", "cid", todo.c.String())
 		return
 	}
@@ -416,8 +431,17 @@ func (s *walkScheduler) processTask(t walkTask, workerN int) error {
 	}
 
 	blk, err := s.store.Get(s.ctx, t.c)
+	if errors.Is(err, format.ErrNotFound{}) && t.topLevelTaskType == receiptTask {
+		log.Debugw("ignoring not-found block in Receipts",
+			"block", t.blockCid,
+			"epoch", t.epoch,
+			"cid", t.c)
+		return nil
+	}
 	if err != nil {
-		return xerrors.Errorf("writing object to car, bs.Get: %w", err)
+		return xerrors.Errorf(
+			"blockstore.Get(%s). Task: %s. Block: %s (%s). Epoch: %d. Err: %w",
+			t.c, t.taskType, t.topLevelTaskType, t.blockCid, t.epoch, err)
 	}
 
 	s.results <- taskResult{
@@ -425,15 +449,20 @@ func (s *walkScheduler) processTask(t walkTask, workerN int) error {
 		b: blk,
 	}
 
+	// We exported the ipld block. If it wasn't a CBOR block, there's nothing
+	// else to do and we can bail out early as it won't have any links
+	// etc.
+	if multicodec.Code(t.c.Prefix().Codec) != multicodec.DagCbor ||
+		multicodec.Code(t.c.Prefix().MhType) == multicodec.Identity {
+		return nil
+	}
+
+	rawData := blk.RawData()
+
 	// extract relevant dags to walk from the block
 	if t.taskType == blockTask {
-		blk := t.c
-		data, err := s.store.Get(s.ctx, blk)
-		if err != nil {
-			return err
-		}
 		var b types.BlockHeader
-		if err := b.UnmarshalCBOR(bytes.NewBuffer(data.RawData())); err != nil {
+		if err := b.UnmarshalCBOR(bytes.NewBuffer(rawData)); err != nil {
 			return xerrors.Errorf("unmarshalling block header (cid=%s): %w", blk, err)
 		}
 		if b.Height%1_000 == 0 {
@@ -443,13 +472,19 @@ func (s *walkScheduler) processTask(t walkTask, workerN int) error {
 			log.Info("exporting genesis block")
 			for i := range b.Parents {
 				s.enqueueIfNew(walkTask{
-					c:        b.Parents[i],
-					taskType: dagTask,
+					c:                b.Parents[i],
+					taskType:         dagTask,
+					topLevelTaskType: blockTask,
+					blockCid:         b.Parents[i],
+					epoch:            0,
 				})
 			}
 			s.enqueueIfNew(walkTask{
-				c:        b.ParentStateRoot,
-				taskType: stateTask,
+				c:                b.ParentStateRoot,
+				taskType:         stateTask,
+				topLevelTaskType: stateTask,
+				blockCid:         t.c,
+				epoch:            0,
 			})
 
 			return s.sendFinish(workerN)
@@ -457,33 +492,45 @@ func (s *walkScheduler) processTask(t walkTask, workerN int) error {
 		// enqueue block parents
 		for i := range b.Parents {
 			s.enqueueIfNew(walkTask{
-				c:        b.Parents[i],
-				taskType: blockTask,
+				c:                b.Parents[i],
+				taskType:         blockTask,
+				topLevelTaskType: blockTask,
+				blockCid:         b.Parents[i],
+				epoch:            b.Height,
 			})
 		}
 		if s.cfg.tail.Height() >= b.Height {
-			log.Debugw("tail reached: only blocks will be exported from now until genesis", "cid", blk.String())
+			log.Debugw("tail reached: only blocks will be exported from now until genesis", "cid", t.c.String())
 			return nil
 		}
 
 		if s.cfg.includeMessages {
 			// enqueue block messages
 			s.enqueueIfNew(walkTask{
-				c:        b.Messages,
-				taskType: messageTask,
+				c:                b.Messages,
+				taskType:         messageTask,
+				topLevelTaskType: messageTask,
+				blockCid:         t.c,
+				epoch:            b.Height,
 			})
 		}
 		if s.cfg.includeReceipts {
 			// enqueue block receipts
 			s.enqueueIfNew(walkTask{
-				c:        b.ParentMessageReceipts,
-				taskType: receiptTask,
+				c:                b.ParentMessageReceipts,
+				taskType:         receiptTask,
+				topLevelTaskType: receiptTask,
+				blockCid:         t.c,
+				epoch:            b.Height,
 			})
 		}
 		if s.cfg.includeState {
 			s.enqueueIfNew(walkTask{
-				c:        b.ParentStateRoot,
-				taskType: stateTask,
+				c:                b.ParentStateRoot,
+				taskType:         stateTask,
+				topLevelTaskType: stateTask,
+				blockCid:         t.c,
+				epoch:            b.Height,
 			})
 		}
 
@@ -491,16 +538,22 @@ func (s *walkScheduler) processTask(t walkTask, workerN int) error {
 	}
 
 	// Not a chain-block: we scan for CIDs in the raw block-data
-	return cbg.ScanForLinks(bytes.NewReader(blk.RawData()), func(c cid.Cid) {
-		if t.c.Prefix().Codec != cid.DagCBOR || t.c.Prefix().MhType == mh.IDENTITY {
-			return
-		}
-
+	err = cbg.ScanForLinks(bytes.NewReader(rawData), func(c cid.Cid) {
 		s.enqueueIfNew(walkTask{
-			c:        c,
-			taskType: dagTask,
+			c:                c,
+			taskType:         dagTask,
+			topLevelTaskType: t.topLevelTaskType,
+			blockCid:         t.blockCid,
+			epoch:            t.epoch,
 		})
 	})
+
+	if err != nil {
+		return xerrors.Errorf(
+			"ScanForLinks(%s). Task: %s. Block: %s (%s). Epoch: %d. Err: %w",
+			t.c, t.taskType, t.topLevelTaskType, t.blockCid, t.epoch, err)
+	}
+	return nil
 }
 
 func (cs *ChainStore) ExportRange(
@@ -633,14 +686,13 @@ func (cs *ChainStore) WalkSnapshot(ctx context.Context, ts *types.TipSet, inclRe
 				prefix := c.Prefix()
 
 				// Don't include identity CIDs.
-				if prefix.MhType == mh.IDENTITY {
+				if multicodec.Code(prefix.MhType) == multicodec.Identity {
 					continue
 				}
 
-				// We only include raw and dagcbor, for now.
-				// Raw for "code" CIDs.
-				switch prefix.Codec {
-				case cid.Raw, cid.DagCBOR:
+				// We only include raw, cbor, and dagcbor, for now.
+				switch multicodec.Code(prefix.Codec) {
+				case multicodec.Cbor, multicodec.DagCbor, multicodec.Raw:
 				default:
 					continue
 				}
@@ -672,7 +724,7 @@ func (cs *ChainStore) WalkSnapshot(ctx context.Context, ts *types.TipSet, inclRe
 }
 
 func recurseLinks(ctx context.Context, bs bstore.Blockstore, walked *cid.Set, root cid.Cid, in []cid.Cid) ([]cid.Cid, error) {
-	if root.Prefix().Codec != cid.DagCBOR {
+	if multicodec.Code(root.Prefix().Codec) != multicodec.DagCbor {
 		return in, nil
 	}
 
